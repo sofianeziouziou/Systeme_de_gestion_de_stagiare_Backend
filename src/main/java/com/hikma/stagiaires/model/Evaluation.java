@@ -1,11 +1,8 @@
 package com.hikma.stagiaires.model;
 
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import org.springframework.data.annotation.Id;
+import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -25,19 +22,17 @@ public class Evaluation {
     private String tuteurId;
     private String projetId;
 
-    // Critères d'évaluation (notes sur 100)
-    private Double qualiteTechnique;    // Pondération 40%
-    private Double respectDelais;       // Pondération 20%
-    private Double communication;       // Pondération 20%
-    private Double espritEquipe;        // Pondération 20%
+    // ── Critères (0.0–100.0) — même noms que l'ancien modèle ─────────
+    private Double qualiteTechnique;   // = compétences techniques 40%
+    private Double respectDelais;       // 20%
+    private Double communication;       // 20%
+    private Double espritEquipe;        // = travail en équipe 20%
 
-    // Score global calculé automatiquement
-    // Score = (Tech x 0.40) + (Delais x 0.20) + (Comm x 0.20) + (Equipe x 0.20)
-    private Double scoreGlobal;
+    private Double scoreGlobal;         // calculé
+    private String commentaire;
 
-    private String commentaire;         // Commentaire libre du tuteur
-
-    private EvaluationStatus status;    // BROUILLON, SOUMISE, VALIDEE
+    @Builder.Default
+    private EvaluationStatus status = EvaluationStatus.SOUMISE;
 
     @CreatedDate
     private LocalDateTime createdAt;
@@ -45,14 +40,12 @@ public class Evaluation {
     @LastModifiedDate
     private LocalDateTime updatedAt;
 
-    // Calcul automatique du score global
+    // ── Calcule le score pondéré CDC ──────────────────────────────────
     public void calculateScore() {
-        if (qualiteTechnique != null && respectDelais != null
-                && communication != null && espritEquipe != null) {
-            this.scoreGlobal = (qualiteTechnique * 0.40)
-                    + (respectDelais * 0.20)
-                    + (communication * 0.20)
-                    + (espritEquipe * 0.20);
-        }
+        double tech   = qualiteTechnique != null ? qualiteTechnique : 0;
+        double delais = respectDelais    != null ? respectDelais    : 0;
+        double comm   = communication   != null ? communication    : 0;
+        double equipe = espritEquipe     != null ? espritEquipe     : 0;
+        this.scoreGlobal = Math.round((tech * 0.4 + delais * 0.2 + comm * 0.2 + equipe * 0.2) * 100.0) / 100.0;
     }
 }

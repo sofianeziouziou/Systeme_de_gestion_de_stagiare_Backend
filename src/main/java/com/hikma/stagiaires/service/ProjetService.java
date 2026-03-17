@@ -31,6 +31,26 @@ public class ProjetService {
     private final AuditLogService auditLogService;
 
     public ProjetResponse create(CreateRequest req, String tuteurId) {
+
+        // ── Règle : 1 stagiaire = 1 projet actif à la fois ───────────────
+        if (req.getStagiaireIds() != null) {
+            for (String stagiaireId : req.getStagiaireIds()) {
+                boolean hasActiveProjet = projetRepository
+                        .findByStagiaireIdsContainingAndDeletedFalse(stagiaireId)
+                        .stream()
+                        .anyMatch(p -> p.getStatus() != ProjetStatus.TERMINE
+                                && p.getStatus() != ProjetStatus.ANNULE);
+                if (hasActiveProjet) {
+                    // Récupérer le nom du stagiaire pour le message
+                    String nom = stagiaireRepository.findById(stagiaireId)
+                            .map(s -> s.getFirstName() + " " + s.getLastName())
+                            .orElse(stagiaireId);
+                    throw new IllegalArgumentException(
+                            "Le stagiaire " + nom + " a déjà un projet actif en cours.");
+                }
+            }
+        }
+
         List<Projet.Jalon> jalons = req.getJalons() == null ? List.of() :
                 req.getJalons().stream()
                         .map(j -> new Projet.Jalon(j.getTitle(), j.getDate(), j.isCompleted()))

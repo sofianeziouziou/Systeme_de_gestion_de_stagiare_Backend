@@ -33,6 +33,13 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.value(), ex.getMessage(), null));
     }
 
+    // ── NOUVEAU : compte EN_ATTENTE ou REFUSE → 403 ───────────────────────
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(
+                HttpStatus.FORBIDDEN.value(), ex.getMessage(), null));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(NoSuchElementException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(
