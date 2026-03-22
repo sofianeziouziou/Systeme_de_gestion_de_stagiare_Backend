@@ -242,4 +242,49 @@ public class StagiaireService {
         }
         return r;
     }
+    public void deleteByUserId(String userId) {
+        stagiaireRepository.findByUserId(userId)
+                .ifPresent(s -> stagiaireRepository.deleteById(s.getId()));
+    }
+    // ── Créer fiche stagiaire automatiquement lors de l'approbation ──────
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public void createFicheForUser(User user) {
+        // 1. Si une fiche existe déjà pour ce userId → on sort
+        if (stagiaireRepository.findByUserId(user.getId()).isPresent()) {
+            log.info("Fiche stagiaire déjà existante pour userId={}", user.getId());
+            return;
+        }
+
+        // 2. Si une fiche existe déjà pour cet email → on lie juste le userId
+        if (user.getEmail() != null) {
+            Optional<Stagiaire> existingByEmail =
+                    stagiaireRepository.findByEmailAndDeletedFalse(user.getEmail());
+            if (existingByEmail.isPresent()) {
+                Stagiaire s = existingByEmail.get();
+                s.setUserId(user.getId());
+                stagiaireRepository.save(s);
+                log.info("UserId lié à la fiche existante email={}", user.getEmail());
+                return;
+            }
+        }
+
+        // 3. Création d'une nouvelle fiche minimale
+        Stagiaire stagiaire = Stagiaire.builder()
+                .userId(user.getId())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .email(user.getEmail())          // ← crucial : évite la contrainte unique null
+                .phone(user.getPhone())
+                .status(StagiaireStatus.EN_COURS)
+                .technicalSkills(List.of())
+                .softSkills(List.of())
+                .scoreHistory(List.of())
+                .globalScore(0.0)
+                .deleted(false)
+                .build();
+
+        stagiaireRepository.save(stagiaire);
+        log.info("Fiche stagiaire créée pour userId={} email={}", user.getId(), user.getEmail());
+    }
 }

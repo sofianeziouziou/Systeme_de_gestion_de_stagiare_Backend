@@ -2,9 +2,7 @@ package com.hikma.stagiaires.controller;
 
 import com.hikma.stagiaires.model.AccountStatus;
 import com.hikma.stagiaires.model.Role;
-import com.hikma.stagiaires.model.Stagiaire;
 import com.hikma.stagiaires.model.User;
-import com.hikma.stagiaires.repository.StagiaireRepository;
 import com.hikma.stagiaires.repository.UserRepository;
 import com.hikma.stagiaires.service.AuditLogService;
 import com.hikma.stagiaires.service.StagiaireService;
@@ -30,36 +28,40 @@ import java.util.stream.Collectors;
 @Tag(name = "Users", description = "Gestion des comptes utilisateurs")
 public class UserController {
 
-    private final UserRepository      userRepository;
-    private final StagiaireRepository stagiaireRepository;
-    private final AuditLogService     auditLogService;
-    private final StagiaireService    stagiaireService;
-    private final PasswordEncoder     passwordEncoder;
+    private final UserRepository   userRepository;
+    private final AuditLogService  auditLogService;
+    private final StagiaireService stagiaireService;
+    private final PasswordEncoder  passwordEncoder;
 
-    // ── Demandes en attente (RH) ──────────────────────────────────────────
+    // ── Demandes en attente (RH) ─────────────────────────────────────────────
     @GetMapping("/pending")
     @PreAuthorize("hasRole('RH')")
+    @Operation(summary = "Liste des comptes en attente d'approbation")
     public ResponseEntity<List<UserResponse>> getPendingUsers() {
-        return ResponseEntity.ok(
-                userRepository.findAll().stream()
-                        .filter(u -> AccountStatus.EN_ATTENTE.equals(u.getAccountStatus()))
-                        .map(this::toResponse).collect(Collectors.toList()));
+        List<UserResponse> pending = userRepository.findAll().stream()
+                .filter(u -> AccountStatus.EN_ATTENTE.equals(u.getAccountStatus()))
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(pending);
     }
 
-    // ── Tous les utilisateurs (RH) ────────────────────────────────────────
+    // ── Tous les utilisateurs (RH) ──────────────────────────────────────────
     @GetMapping
     @PreAuthorize("hasRole('RH')")
+    @Operation(summary = "Liste tous les utilisateurs")
     public ResponseEntity<List<UserResponse>> getAll(
             @RequestParam(required = false) String role,
             @RequestParam(required = false) String status) {
-        return ResponseEntity.ok(
-                userRepository.findAll().stream()
-                        .filter(u -> role == null || u.getRole().name().equals(role.toUpperCase()))
-                        .filter(u -> status == null || u.getAccountStatus().name().equals(status.toUpperCase()))
-                        .map(this::toResponse).collect(Collectors.toList()));
+
+        List<UserResponse> users = userRepository.findAll().stream()
+                .filter(u -> role == null || u.getRole().name().equals(role.toUpperCase()))
+                .filter(u -> status == null || u.getAccountStatus().name().equals(status.toUpperCase()))
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(users);
     }
 
-    // ── Approuver ─────────────────────────────────────────────────────────
+    // ── Approuver ───────────────────────────────────────────────────────────
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('RH')")
     public ResponseEntity<UserResponse> approveUser(
@@ -68,30 +70,20 @@ public class UserController {
 
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
-
         user.setAccountStatus(AccountStatus.APPROUVE);
         userRepository.save(user);
 
-        // ── Auto-créer la fiche stagiaire si rôle STAGIAIRE ──────────────
+        // Auto-création fiche stagiaire si rôle STAGIAIRE
         if (Role.STAGIAIRE.equals(user.getRole())) {
-            boolean ficheExiste = stagiaireRepository.findByUserId(user.getId()).isPresent();
-            if (!ficheExiste) {
-                Stagiaire fiche = Stagiaire.builder()
-                        .userId(user.getId())
-                        .firstName(user.getFirstName())
-                        .lastName(user.getLastName())
-                        .email(user.getEmail())
-                        .status(com.hikma.stagiaires.model.StagiaireStatus.EN_COURS)
-                        .build();
-                stagiaireRepository.save(fiche);
-            }
+            try { stagiaireService.createFicheForUser(user); }
+            catch (Exception ignored) { /* fiche existe déjà */ }
         }
 
         auditLogService.log(currentUser.getId(), "APPROVE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
 
-    // ── Refuser ───────────────────────────────────────────────────────────
+    // ── Refuser ─────────────────────────────────────────────────────────────
     @PostMapping("/{id}/refuse")
     @PreAuthorize("hasRole('RH')")
     public ResponseEntity<UserResponse> refuseUser(
@@ -107,7 +99,69 @@ public class UserController {
         return ResponseEntity.ok(toResponse(user));
     }
 
-    // ── Assigner tuteur à stagiaire (RH) ──────────────────────────────────
+    // ── DÉSACTIVER un compte (APPROUVE → REFUSE) ────────────────────────────
+    @PostMapping("/{id}/deactivate")
+    @PreAuthorize("hasRole('RH')")
+    @Operation(summary = "Désactiver un compte utilisateur")
+    public ResponseEntity<UserResponse> deactivateUser(
+            @PathVariable String id,
+            @AuthenticationPrincipal User currentUser) {
+
+        if (currentUser.getId().equals(id))
+            throw new IllegalArgumentException("Vous ne pouvez pas désactiver votre propre compte.");
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
+
+        user.setAccountStatus(AccountStatus.REFUSE);
+        userRepository.save(user);
+        auditLogService.log(currentUser.getId(), "DEACTIVATE_USER", "USER", id, null);
+        return ResponseEntity.ok(toResponse(user));
+    }
+
+    // ── RÉACTIVER un compte (REFUSE → APPROUVE) ─────────────────────────────
+    @PostMapping("/{id}/activate")
+    @PreAuthorize("hasRole('RH')")
+    @Operation(summary = "Réactiver un compte utilisateur")
+    public ResponseEntity<UserResponse> activateUser(
+            @PathVariable String id,
+            @AuthenticationPrincipal User currentUser) {
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
+
+        user.setAccountStatus(AccountStatus.APPROUVE);
+        userRepository.save(user);
+        auditLogService.log(currentUser.getId(), "ACTIVATE_USER", "USER", id, null);
+        return ResponseEntity.ok(toResponse(user));
+    }
+
+    // ── SUPPRIMER définitivement ────────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('RH')")
+    @Operation(summary = "Supprimer définitivement un utilisateur")
+    public ResponseEntity<Void> deleteUser(
+            @PathVariable String id,
+            @AuthenticationPrincipal User currentUser) {
+
+        if (currentUser.getId().equals(id))
+            throw new IllegalArgumentException("Vous ne pouvez pas supprimer votre propre compte.");
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
+
+        // Supprimer la fiche stagiaire associée si elle existe
+        if (Role.STAGIAIRE.equals(user.getRole())) {
+            try { stagiaireService.deleteByUserId(id); }
+            catch (Exception ignored) {}
+        }
+
+        userRepository.deleteById(id);
+        auditLogService.log(currentUser.getId(), "DELETE_USER", "USER", id, null);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ── Assigner tuteur à stagiaire (RH) ───────────────────────────────────
     @PutMapping("/stagiaires/{stagiaireId}/tuteur/{tuteurId}")
     @PreAuthorize("hasRole('RH')")
     public ResponseEntity<StagiaireResponse> assignTuteur(
@@ -129,14 +183,15 @@ public class UserController {
         return ResponseEntity.ok(updated);
     }
 
-    // ── Profil connecté (GET) ─────────────────────────────────────────────
+    // ── Profil connecté ─────────────────────────────────────────────────────
     @GetMapping("/me")
+    @Operation(summary = "Profil de l'utilisateur connecté")
     public ResponseEntity<UserResponse> getMe(@AuthenticationPrincipal User currentUser) {
         return ResponseEntity.ok(toResponse(currentUser));
     }
 
-    // ── Modifier son propre profil (PUT) ──────────────────────────────────
     @PutMapping("/me")
+    @Operation(summary = "Modifier son propre profil")
     public ResponseEntity<UserResponse> updateMe(
             @RequestBody UpdateMeRequest req,
             @AuthenticationPrincipal User currentUser) {
@@ -149,21 +204,11 @@ public class UserController {
             currentUser.setPhone(req.getPhone());
 
         userRepository.save(currentUser);
-
-        // Sync fiche stagiaire si nécessaire
-        if (Role.STAGIAIRE.equals(currentUser.getRole())) {
-            stagiaireRepository.findByUserId(currentUser.getId()).ifPresent(s -> {
-                if (req.getFirstName() != null) s.setFirstName(req.getFirstName());
-                if (req.getLastName()  != null) s.setLastName(req.getLastName());
-                stagiaireRepository.save(s);
-            });
-        }
-
         return ResponseEntity.ok(toResponse(currentUser));
     }
 
-    // ── Changer mot de passe ──────────────────────────────────────────────
     @PutMapping("/me/password")
+    @Operation(summary = "Changer son mot de passe")
     public ResponseEntity<Void> changePassword(
             @RequestBody ChangePasswordRequest req,
             @AuthenticationPrincipal User currentUser) {
@@ -178,42 +223,29 @@ public class UserController {
         return ResponseEntity.ok().build();
     }
 
-    // ── Liste tuteurs approuvés ───────────────────────────────────────────
+    // ── Liste tuteurs approuvés ────────────────────────────────────────────
     @GetMapping("/tuteurs")
     @PreAuthorize("hasRole('RH')")
     public ResponseEntity<List<UserResponse>> getTuteurs() {
-        return ResponseEntity.ok(
-                userRepository.findAll().stream()
-                        .filter(u -> Role.TUTEUR.equals(u.getRole())
-                                && AccountStatus.APPROUVE.equals(u.getAccountStatus()))
-                        .map(this::toResponse).collect(Collectors.toList()));
+        List<UserResponse> tuteurs = userRepository.findAll().stream()
+                .filter(u -> Role.TUTEUR.equals(u.getRole())
+                        && AccountStatus.APPROUVE.equals(u.getAccountStatus()))
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(tuteurs);
     }
 
-    // ── DTOs ──────────────────────────────────────────────────────────────
-    @Data
-    public static class UserResponse {
-        private String id;
-        private String firstName;
-        private String lastName;
-        private String email;
-        private String phone;
-        private String role;
-        private String accountStatus;
-        private String photoUrl;
-        private String createdAt;
+    // ── DTOs ───────────────────────────────────────────────────────────────
+    @Data public static class UserResponse {
+        private String id, firstName, lastName, email, phone, role, accountStatus, photoUrl, createdAt;
     }
 
-    @Data
-    public static class UpdateMeRequest {
-        private String firstName;
-        private String lastName;
-        private String phone;
+    @Data public static class UpdateMeRequest {
+        private String firstName, lastName, phone;
     }
 
-    @Data
-    public static class ChangePasswordRequest {
-        private String currentPassword;
-        private String newPassword;
+    @Data public static class ChangePasswordRequest {
+        private String currentPassword, newPassword;
     }
 
     private UserResponse toResponse(User u) {

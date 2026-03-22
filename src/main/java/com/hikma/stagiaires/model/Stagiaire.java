@@ -24,6 +24,7 @@ public class Stagiaire {
     @Id
     private String id;
 
+
     // Informations personnelles
     private String firstName;
     private String lastName;
