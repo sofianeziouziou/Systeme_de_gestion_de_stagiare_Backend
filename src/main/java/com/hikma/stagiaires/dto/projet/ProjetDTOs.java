@@ -14,28 +14,21 @@ public class ProjetDTOs {
     public static class CreateRequest {
         @NotBlank @Size(max = 100)
         private String title;
-
         private String description;
-
-        @NotEmpty
-        private List<String> stagiaireIds;
-
-        @NotNull
-        private LocalDate startDate;
-
-        @NotNull
-        private LocalDate plannedEndDate;
-
+        @NotBlank(message = "Le tuteur est obligatoire")
+        private String tuteurId;
+        @NotEmpty(message = "Au moins un stagiaire requis")
+        private List<String> stagiaireIds;   // userId
+        @NotNull private LocalDate startDate;
+        @NotNull private LocalDate plannedEndDate;
         private List<String> technologies;
-        private List<JalonRequest> jalons;
     }
 
     @Data
     public static class UpdateRequest {
-        @Size(max = 100)
-        private String title;
-
+        @Size(max = 100) private String title;
         private String description;
+        private String tuteurId;
         private List<String> stagiaireIds;
         private LocalDate startDate;
         private LocalDate plannedEndDate;
@@ -43,18 +36,31 @@ public class ProjetDTOs {
         private Integer progress;
         private ProjetStatus status;
         private List<String> technologies;
-        private List<JalonRequest> jalons;
+        private List<SprintRequest> sprints;
     }
 
     @Data
-    public static class JalonRequest {
-        @NotBlank
+    public static class SprintRequest {
+        private String id;
+        @NotBlank private String title;
+        private String description;
+        @NotNull private LocalDate startDate;
+        @NotNull private LocalDate endDate;
+        private String stagiaireId;   // ← userId du stagiaire assigné à ce sprint
+        private String status;
+    }
+
+    @Data
+    public static class SprintResponse {
+        private String id;
         private String title;
-
-        @NotNull
-        private LocalDate date;
-
-        private boolean completed;
+        private String description;
+        private LocalDate startDate;
+        private LocalDate endDate;
+        private String status;
+        private boolean overdue;
+        private String stagiaireId;    // ← userId
+        private String stagiaireName;  // ← prénom + nom résolu
     }
 
     @Data
@@ -72,7 +78,7 @@ public class ProjetDTOs {
         private Integer progress;
         private ProjetStatus status;
         private List<String> technologies;
-        private List<JalonResponse> jalons;
+        private List<SprintResponse> sprints;
         private String reportUrl;
         private LocalDate reportSubmittedAt;
         private LocalDateTime createdAt;
@@ -80,27 +86,10 @@ public class ProjetDTOs {
 
         @Data
         public static class StagiaireInfo {
-            private String id;
+            private String id;         // userId
             private String firstName;
             private String lastName;
             private String photoUrl;
         }
-
-        @Data
-        public static class JalonResponse {
-            private String title;
-            private LocalDate date;
-            private boolean completed;
-        }
-    }
-
-    @Data
-    public static class ProjetSummary {
-        private String id;
-        private String title;
-        private Integer progress;
-        private ProjetStatus status;
-        private LocalDate plannedEndDate;
-        private int stagiaireCount;
     }
 }

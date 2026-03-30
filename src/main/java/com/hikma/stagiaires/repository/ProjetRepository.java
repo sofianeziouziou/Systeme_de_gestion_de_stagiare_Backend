@@ -5,9 +5,9 @@ import com.hikma.stagiaires.model.ProjetStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.data.mongodb.repository.Query;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ProjetRepository extends MongoRepository<Projet, String> {
@@ -22,15 +22,17 @@ public interface ProjetRepository extends MongoRepository<Projet, String> {
 
     long countByStatusAndDeletedFalse(ProjetStatus status);
 
-    // Projets dont la deadline approche (dans les 7 prochains jours)
-    @Query("{ 'deleted': false, 'status': 'EN_COURS', 'plannedEndDate': { $gte: ?0, $lte: ?1 } }")
-    List<Projet> findProjetsByDeadlineApproching(LocalDate now, LocalDate limit);
+    // ── CORRIGÉ : Spring Data convertit LocalDate automatiquement ────────
 
-    // Projets en retard (deadline dépassée et pas terminé)
-    @Query("{ 'deleted': false, 'status': { $ne: 'TERMINE' }, 'plannedEndDate': { $lt: ?0 } }")
-    List<Projet> findOverdueProjects(LocalDate now);
+    // Deadlines proches : EN_COURS + plannedEndDate entre now et limit
+    List<Projet> findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+            ProjetStatus status, LocalDate start, LocalDate end);
 
-    // Projets sans mise à jour depuis 5 jours
-    @Query("{ 'deleted': false, 'status': 'EN_COURS', 'updatedAt': { $lt: ?0 } }")
-    List<Projet> findProjectsWithoutRecentUpdate(java.time.LocalDateTime limit);
+    // Projets en retard : pas TERMINE/ANNULE + plannedEndDate < today
+    List<Projet> findByDeletedFalseAndStatusNotInAndPlannedEndDateBefore(
+            List<ProjetStatus> excludedStatuses, LocalDate date);
+
+    // Sans mise à jour depuis 5 jours : EN_COURS + updatedAt < limit
+    List<Projet> findByDeletedFalseAndStatusAndUpdatedAtBefore(
+            ProjetStatus status, LocalDateTime limit);
 }

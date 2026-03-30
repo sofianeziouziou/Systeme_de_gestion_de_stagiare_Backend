@@ -55,7 +55,8 @@ public class Stagiaire {
     private List<String> softSkills = List.of();
 
     // Documents
-    private String cvUrl;            // URL vers S3/MinIO
+    private String cvUrl;// URL vers S3/MinIO
+    private String bio;
 
     // Score et évaluation
     @Builder.Default

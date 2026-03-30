@@ -65,8 +65,7 @@ public class DashboardService {
 
         // ── Distribution des scores (histogramme) ────────────────────────
         List<Stagiaire> allStagiaires = stagiaireRepository
-                .findByDeletedFalse(Pageable.unpaged())
-                .getContent();
+                .findByDeletedFalse();
 
         Map<String, Long> distrib = new LinkedHashMap<>();
         distrib.put("0-20",   count(allStagiaires, 0,  20));

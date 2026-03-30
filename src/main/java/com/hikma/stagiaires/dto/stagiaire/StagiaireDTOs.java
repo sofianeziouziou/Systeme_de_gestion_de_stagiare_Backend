@@ -66,6 +66,7 @@ public class StagiaireDTOs {
         private List<String> technicalSkills;
         private List<String> softSkills;
         private StagiaireStatus status;
+        private String bio;              // ← ajouter cette ligne
     }
 
     @Data
@@ -112,6 +113,7 @@ public class StagiaireDTOs {
         private StagiaireStatus status;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
+        private String bio;
     }
 
     @Data

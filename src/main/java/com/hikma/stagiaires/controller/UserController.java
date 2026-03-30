@@ -234,6 +234,17 @@ public class UserController {
                 .collect(Collectors.toList());
         return ResponseEntity.ok(tuteurs);
     }
+    // Liste des stagiaires approuvés sans projet actif (pour le select)
+    @GetMapping("/stagiaires")
+    @PreAuthorize("hasRole('RH')")
+    public ResponseEntity<List<UserResponse>> getStagiaires() {
+        List<UserResponse> stagiaires = userRepository.findAll().stream()
+                .filter(u -> Role.STAGIAIRE.equals(u.getRole())
+                        && AccountStatus.APPROUVE.equals(u.getAccountStatus()))
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(stagiaires);
+    }
 
     // ── DTOs ───────────────────────────────────────────────────────────────
     @Data public static class UserResponse {
@@ -261,4 +272,5 @@ public class UserController {
         r.setCreatedAt(u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
         return r;
     }
+
 }
