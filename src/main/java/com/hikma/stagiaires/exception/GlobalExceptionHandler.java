@@ -1,71 +1,125 @@
+// src/main/java/com/hikma/sims/exception/GlobalExceptionHandler.java
 package com.hikma.stagiaires.exception;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.*;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
-import java.time.LocalDateTime;
-import java.util.*;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new LinkedHashMap<>();
-        ex.getBindingResult().getAllErrors().forEach(error -> {
-            String field = ((FieldError) error).getField();
-            errors.put(field, error.getDefaultMessage());
-        });
-        return ResponseEntity.badRequest().body(new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(), "Erreur de validation", errors.toString()));
+    // ── Réponse standard ─────────────────────────────────────────────────
+
+    private record ApiError(
+            String  code,
+            String  message,
+            int     status,
+            Instant timestamp
+    ) {}
+
+    private static ResponseEntity<ApiError> error(
+            String code, String message, HttpStatus status
+    ) {
+        return ResponseEntity
+                .status(status)
+                .body(new ApiError(code, message, status.value(), Instant.now()));
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
-        return ResponseEntity.badRequest().body(new ErrorResponse(
-                HttpStatus.BAD_REQUEST.value(), ex.getMessage(), null));
+    // ── Exceptions métier SIMS ────────────────────────────────────────────
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiError> handleNotFound(ResourceNotFoundException ex) {
+        log.warn("[SIMS] Ressource introuvable : {}", ex.getMessage());
+        return error("RESOURCE_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    // ── NOUVEAU : compte EN_ATTENTE ou REFUSE → 403 ───────────────────────
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(
-                HttpStatus.FORBIDDEN.value(), ex.getMessage(), null));
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiError> handleBusiness(BusinessException ex) {
+        log.warn("[SIMS] Erreur métier [{}] : {}", ex.getCode(), ex.getMessage());
+        return error(ex.getCode(), ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<ErrorResponse> handleNotFound(NoSuchElementException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(
-                HttpStatus.NOT_FOUND.value(), ex.getMessage(), null));
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
+        log.warn("[SIMS] Conflit : {}", ex.getMessage());
+        return error("CONFLICT", ex.getMessage(), HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex) {
+        log.warn("[SIMS] Accès interdit : {}", ex.getMessage());
+        return error(ex.getCode(), ex.getMessage(), HttpStatus.FORBIDDEN);
+    }
+
+    // ── Sécurité Spring ───────────────────────────────────────────────────
+
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<ApiError> handleBadCredentials(BadCredentialsException ex) {
+        return error("INVALID_CREDENTIALS", "Email ou mot de passe incorrect.", HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<ApiError> handleDisabled(DisabledException ex) {
+        return error("ACCOUNT_DISABLED", "Votre compte a été désactivé. Contactez le RH.", HttpStatus.FORBIDDEN);
+    }
+
+    @ExceptionHandler(LockedException.class)
+    public ResponseEntity<ApiError> handleLocked(LockedException ex) {
+        return error("ACCOUNT_LOCKED", "Votre compte est en attente d'approbation.", HttpStatus.FORBIDDEN);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse(
-                HttpStatus.FORBIDDEN.value(), "Accès refusé", null));
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex) {
+        return error("ACCESS_DENIED", "Vous n'avez pas les droits pour cette action.", HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ErrorResponse(
-                HttpStatus.UNAUTHORIZED.value(), "Email ou mot de passe incorrect", null));
+    // ── Validation @Valid ─────────────────────────────────────────────────
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+        Map<String, String> fieldErrors = new HashMap<>();
+        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
+            fieldErrors.put(fe.getField(), fe.getDefaultMessage());
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("code",      "VALIDATION_ERROR");
+        body.put("message",   "Données invalides — vérifiez les champs.");
+        body.put("fields",    fieldErrors);
+        body.put("status",    HttpStatus.BAD_REQUEST.value());
+        body.put("timestamp", Instant.now());
+        return ResponseEntity.badRequest().body(body);
     }
+
+    // ── Upload ────────────────────────────────────────────────────────────
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleMaxUpload(MaxUploadSizeExceededException ex) {
+        return error("FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée (5 MB).", HttpStatus.PAYLOAD_TOO_LARGE);
+    }
+
+    // ── Fallback ──────────────────────────────────────────────────────────
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
-        log.error("Erreur inattendue", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ErrorResponse(
-                HttpStatus.INTERNAL_SERVER_ERROR.value(), "Erreur interne du serveur", null));
-    }
-
-    public record ErrorResponse(int status, String message, String details) {
-        public LocalDateTime timestamp() { return LocalDateTime.now(); }
+    public ResponseEntity<ApiError> handleAll(Exception ex) {
+        log.error("[SIMS] Erreur inattendue : {}", ex.getMessage(), ex);
+        return error(
+                "INTERNAL_ERROR",
+                "Une erreur interne est survenue. Réessayez ou contactez l'administrateur.",
+                HttpStatus.INTERNAL_SERVER_ERROR
+        );
     }
 }

@@ -2,7 +2,6 @@ package com.hikma.stagiaires.repository;
 
 import com.hikma.stagiaires.model.Stagiaire;
 import com.hikma.stagiaires.model.StagiaireStatus;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 
@@ -11,30 +10,30 @@ import java.util.Optional;
 
 public interface StagiaireRepository extends MongoRepository<Stagiaire, String> {
 
-    // ── Email ─────────────────────────────────────────────────────────────
-    Optional<Stagiaire> findByEmail(String email);
-    Optional<Stagiaire> findByEmailAndDeletedFalse(String email);
-    boolean existsByEmailAndDeletedFalse(String email);
-
-    // ── userId ────────────────────────────────────────────────────────────
+    // ── Lookup par userId / email ─────────────────────────────────────────
     Optional<Stagiaire> findByUserId(String userId);
-    Optional<Stagiaire> findByUserIdAndDeletedFalse(String userId);
+    boolean existsByEmailAndDeletedFalse(String email);
+    Optional<Stagiaire> findByEmailAndDeletedFalse(String email);
 
-    // ── Tuteur ────────────────────────────────────────────────────────────
-    List<Stagiaire> findByTuteurId(String tuteurId);
-
-    // ── Soft delete ───────────────────────────────────────────────────────
+    // ── Toutes les fiches actives (P3 fix — 1 requête pour recommandations) ──
     List<Stagiaire> findByDeletedFalse();
-    List<Stagiaire> findByDeletedFalse(Pageable pageable);  // ← pour DashboardService
 
-    // ── Statut ────────────────────────────────────────────────────────────
-    List<Stagiaire> findByStatusAndDeletedFalse(StagiaireStatus status);
+    // ── Par tuteur ────────────────────────────────────────────────────────
+    List<Stagiaire> findByTuteurIdAndDeletedFalse(String tuteurId);
+
+    // ── DashboardService : count par statut ───────────────────────────────
     long countByStatusAndDeletedFalse(StagiaireStatus status);
 
-    // ── Top 10 par score ──────────────────────────────────────────────────
+    // ── DashboardService : liste par statut ──────────────────────────────
+    List<Stagiaire> findByStatusAndDeletedFalse(StagiaireStatus status);
+
+    // ── DashboardService : top 10 par score ──────────────────────────────
     List<Stagiaire> findTop10ByDeletedFalseOrderByGlobalScoreDesc();
-    List<Stagiaire> findByTuteurIdAndDeletedFalse(String tuteurId);
-    // ── Agrégation par département ────────────────────────────────────────
+
+    // ── DashboardService : par département (pour agrégation scores) ───────
     @Query("{ 'departement': ?0, 'deleted': false }")
     List<Stagiaire> findByDepartementForAggregation(String departement);
+
+    // ── Recherche par département (standard) ─────────────────────────────
+    List<Stagiaire> findByDepartementAndDeletedFalse(String departement);
 }

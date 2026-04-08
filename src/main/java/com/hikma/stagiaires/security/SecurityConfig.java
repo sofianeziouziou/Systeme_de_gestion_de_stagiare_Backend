@@ -77,15 +77,22 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of(
+                // localhost
                 "http://localhost:5173",
                 "http://localhost:5174",
                 "http://localhost:8082",
                 "http://localhost:8083",
-                "http://localhost:3000"
+                "http://localhost:3000",
+                // IP réseau local (accès depuis autre appareil ou Vite par IP)
+                "http://192.168.1.*:*",
+                "http://192.168.0.*:*",
+                // wildcard réseau local — couvre tous les ports et IPs locales
+                "http://192.168.*.*:*"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;
