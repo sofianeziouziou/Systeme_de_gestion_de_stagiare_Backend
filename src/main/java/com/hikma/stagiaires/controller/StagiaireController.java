@@ -7,8 +7,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,41 +23,35 @@ public class StagiaireController {
 
     private final StagiaireService stagiaireService;
 
-    // ────────────────────────────────────────────────────────────────
-    // NOUVEAU : GET /api/v1/stagiaires
-    //   - RH       → tous les stagiaires (paginé, filtre search/tuteurId)
-    //   - TUTEUR   → uniquement SES stagiaires (tuteurId injecté auto)
-    // ────────────────────────────────────────────────────────────────
+    // ── GET /api/v1/stagiaires — MODIFIÉ : ajout param departement ──────────
     @GetMapping
     @PreAuthorize("hasAnyRole('RH', 'TUTEUR')")
-    @Operation(summary = "Liste des stagiaires (paginée)")
+    @Operation(summary = "Liste des stagiaires (paginée, filtrable par département)")
     public ResponseEntity<PagedResponse> getAll(
             @RequestParam(defaultValue = "0")  int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false)    String search,
             @RequestParam(required = false)    String tuteurId,
+            @RequestParam(required = false)    String departement,   // NOUVEAU
             @AuthenticationPrincipal User currentUser) {
 
         SearchFilter filter = new SearchFilter();
         filter.setPage(page);
         filter.setSize(size);
         filter.setSearch(search);
+        filter.setDepartement(departement);   // NOUVEAU
 
         // Tuteur ne voit que ses propres stagiaires
         if ("TUTEUR".equals(currentUser.getRole().name())) {
             filter.setTuteurId(currentUser.getId());
         } else {
-            // RH peut filtrer par tuteur via query param
             filter.setTuteurId(tuteurId);
         }
 
         return ResponseEntity.ok(stagiaireService.search(filter));
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // NOUVEAU : GET /api/v1/stagiaires/me
-    //   - STAGIAIRE → son propre profil lié à son compte User
-    // ────────────────────────────────────────────────────────────────
+    // ── GET /api/v1/stagiaires/me ────────────────────────────────────────────
     @GetMapping("/me")
     @PreAuthorize("hasRole('STAGIAIRE')")
     @Operation(summary = "Profil du stagiaire connecté")
@@ -68,9 +60,7 @@ public class StagiaireController {
         return ResponseEntity.ok(stagiaireService.getByUserId(currentUser.getId()));
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // EXISTANT (inchangé)
-    // ────────────────────────────────────────────────────────────────
+    // ── POST /api/v1/stagiaires ──────────────────────────────────────────────
     @PostMapping
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Créer un stagiaire")
@@ -81,6 +71,7 @@ public class StagiaireController {
         return ResponseEntity.created(URI.create("/api/v1/stagiaires/" + resp.getId())).body(resp);
     }
 
+    // ── GET /api/v1/stagiaires/{id} ──────────────────────────────────────────
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('RH', 'TUTEUR', 'STAGIAIRE')")
     @Operation(summary = "Obtenir un stagiaire par ID")
@@ -88,6 +79,7 @@ public class StagiaireController {
         return ResponseEntity.ok(stagiaireService.getById(id));
     }
 
+    // ── GET /api/v1/stagiaires/search ────────────────────────────────────────
     @GetMapping("/search")
     @PreAuthorize("hasAnyRole('RH', 'TUTEUR')")
     @Operation(summary = "Recherche avancée multicritères")
@@ -100,6 +92,7 @@ public class StagiaireController {
         return ResponseEntity.ok(stagiaireService.search(filter));
     }
 
+    // ── PUT /api/v1/stagiaires/{id} ──────────────────────────────────────────
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('RH', 'STAGIAIRE')")
     @Operation(summary = "Modifier un stagiaire")
@@ -110,6 +103,7 @@ public class StagiaireController {
         return ResponseEntity.ok(stagiaireService.update(id, req, currentUser.getId()));
     }
 
+    // ── DELETE /api/v1/stagiaires/{id} ──────────────────────────────────────
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Archiver un stagiaire (soft delete)")
@@ -120,6 +114,7 @@ public class StagiaireController {
         return ResponseEntity.noContent().build();
     }
 
+    // ── POST /api/v1/stagiaires/{id}/cv ─────────────────────────────────────
     @PostMapping("/{id}/cv")
     @PreAuthorize("hasAnyRole('RH', 'STAGIAIRE')")
     @Operation(summary = "Uploader le CV (PDF)")
@@ -130,6 +125,7 @@ public class StagiaireController {
         return ResponseEntity.ok(stagiaireService.uploadCv(id, file, currentUser.getId()));
     }
 
+    // ── POST /api/v1/stagiaires/{id}/photo ──────────────────────────────────
     @PostMapping("/{id}/photo")
     @PreAuthorize("hasAnyRole('RH', 'STAGIAIRE')")
     @Operation(summary = "Uploader la photo de profil")

@@ -23,6 +23,9 @@ public class Projet {
     private LocalDate plannedEndDate;
     private LocalDate actualEndDate;
 
+    /** NOUVEAU — département du projet */
+    private String departement;
+
     @Builder.Default private Integer progress = 0;
     @Builder.Default private List<Sprint> sprints = List.of();
     @Builder.Default private ProjetStatus status = ProjetStatus.EN_COURS;
@@ -43,7 +46,7 @@ public class Projet {
         private String description;
         private LocalDate startDate;
         private LocalDate endDate;
-        private String stagiaireId;      // userId du stagiaire assigné à ce sprint
+        private String stagiaireId;
         @Builder.Default
         private String status = "EN_COURS";
     }

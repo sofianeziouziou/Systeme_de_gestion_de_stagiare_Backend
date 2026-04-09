@@ -37,13 +37,13 @@ public class User implements UserDetails {
     private String phone;
     private String photoUrl;
 
-    private Role role; // RH, TUTEUR, STAGIAIRE
+    private Role role;
 
-    // ── NOUVEAU : statut de compte ────────────────────────────────────────
+    /** NOUVEAU — département de l'utilisateur (utilisé pour les tuteurs) */
+    private Departement departement;
+
     @Builder.Default
     private AccountStatus accountStatus = AccountStatus.EN_ATTENTE;
-    // RH → APPROUVE directement
-    // TUTEUR / STAGIAIRE → EN_ATTENTE jusqu'à approbation RH
 
     @Builder.Default
     private boolean enabled = true;
@@ -59,8 +59,6 @@ public class User implements UserDetails {
 
     @LastModifiedDate
     private LocalDateTime updatedAt;
-
-    // ─── UserDetails ─────────────────────────────────────────────────────
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -81,7 +79,6 @@ public class User implements UserDetails {
     @Override
     public boolean isCredentialsNonExpired() { return true; }
 
-    // ── isEnabled tient compte du statut ─────────────────────────────────
     @Override
     public boolean isEnabled() {
         return enabled && AccountStatus.APPROUVE.equals(accountStatus);

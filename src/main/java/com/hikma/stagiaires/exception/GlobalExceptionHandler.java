@@ -122,4 +122,25 @@ public class GlobalExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR
         );
     }
+    // AJOUTER ce bloc — avant le handler générique @ExceptionHandler(Exception.class)
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalState(
+            IllegalStateException ex) {
+
+        Map<String, String> body = new HashMap<>();
+        body.put("message", ex.getMessage());
+
+        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
+
+        if (msg.contains("attente") || msg.contains("pending")) {
+            body.put("status", "EN_ATTENTE");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        if (msg.contains("refus") || msg.contains("désactivé") || msg.contains("disabled")) {
+            body.put("status", "REFUSE");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
 }

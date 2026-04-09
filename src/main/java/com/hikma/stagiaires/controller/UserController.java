@@ -1,6 +1,7 @@
 package com.hikma.stagiaires.controller;
 
 import com.hikma.stagiaires.model.AccountStatus;
+import com.hikma.stagiaires.model.Departement;
 import com.hikma.stagiaires.model.Role;
 import com.hikma.stagiaires.model.User;
 import com.hikma.stagiaires.repository.UserRepository;
@@ -73,10 +74,9 @@ public class UserController {
         user.setAccountStatus(AccountStatus.APPROUVE);
         userRepository.save(user);
 
-        // Auto-création fiche stagiaire si rôle STAGIAIRE
         if (Role.STAGIAIRE.equals(user.getRole())) {
             try { stagiaireService.createFicheForUser(user); }
-            catch (Exception ignored) { /* fiche existe déjà */ }
+            catch (Exception ignored) {}
         }
 
         auditLogService.log(currentUser.getId(), "APPROVE_USER", "USER", id, null);
@@ -99,7 +99,7 @@ public class UserController {
         return ResponseEntity.ok(toResponse(user));
     }
 
-    // ── DÉSACTIVER un compte (APPROUVE → REFUSE) ────────────────────────────
+    // ── DÉSACTIVER ──────────────────────────────────────────────────────────
     @PostMapping("/{id}/deactivate")
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Désactiver un compte utilisateur")
@@ -112,14 +112,13 @@ public class UserController {
 
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
-
         user.setAccountStatus(AccountStatus.REFUSE);
         userRepository.save(user);
         auditLogService.log(currentUser.getId(), "DEACTIVATE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
 
-    // ── RÉACTIVER un compte (REFUSE → APPROUVE) ─────────────────────────────
+    // ── RÉACTIVER ───────────────────────────────────────────────────────────
     @PostMapping("/{id}/activate")
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Réactiver un compte utilisateur")
@@ -129,14 +128,13 @@ public class UserController {
 
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
-
         user.setAccountStatus(AccountStatus.APPROUVE);
         userRepository.save(user);
         auditLogService.log(currentUser.getId(), "ACTIVATE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
 
-    // ── SUPPRIMER définitivement ────────────────────────────────────────────
+    // ── SUPPRIMER ───────────────────────────────────────────────────────────
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Supprimer définitivement un utilisateur")
@@ -150,7 +148,6 @@ public class UserController {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
 
-        // Supprimer la fiche stagiaire associée si elle existe
         if (Role.STAGIAIRE.equals(user.getRole())) {
             try { stagiaireService.deleteByUserId(id); }
             catch (Exception ignored) {}
@@ -223,18 +220,31 @@ public class UserController {
         return ResponseEntity.ok().build();
     }
 
-    // ── Liste tuteurs approuvés ────────────────────────────────────────────
+    // ── Liste tuteurs approuvés — MODIFIÉ : filtre département optionnel ────
     @GetMapping("/tuteurs")
     @PreAuthorize("hasRole('RH')")
-    public ResponseEntity<List<UserResponse>> getTuteurs() {
+    @Operation(summary = "Tuteurs approuvés, filtrables par département")
+    public ResponseEntity<List<UserResponse>> getTuteurs(
+            @RequestParam(required = false) String departement
+    ) {
         List<UserResponse> tuteurs = userRepository.findAll().stream()
                 .filter(u -> Role.TUTEUR.equals(u.getRole())
                         && AccountStatus.APPROUVE.equals(u.getAccountStatus()))
+                .filter(u -> {
+                    if (departement == null || departement.isBlank()) return true;
+                    try {
+                        Departement dept = Departement.fromString(departement);
+                        return dept.equals(u.getDepartement());
+                    } catch (IllegalArgumentException e) {
+                        return false;
+                    }
+                })
                 .map(this::toResponse)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(tuteurs);
     }
-    // Liste des stagiaires approuvés sans projet actif (pour le select)
+
+    // ── Liste stagiaires approuvés ──────────────────────────────────────────
     @GetMapping("/stagiaires")
     @PreAuthorize("hasRole('RH')")
     public ResponseEntity<List<UserResponse>> getStagiaires() {
@@ -248,7 +258,8 @@ public class UserController {
 
     // ── DTOs ───────────────────────────────────────────────────────────────
     @Data public static class UserResponse {
-        private String id, firstName, lastName, email, phone, role, accountStatus, photoUrl, createdAt;
+        private String id, firstName, lastName, email, phone, role, accountStatus,
+                photoUrl, departement, createdAt;
     }
 
     @Data public static class UpdateMeRequest {
@@ -269,8 +280,9 @@ public class UserController {
         r.setRole(u.getRole().name());
         r.setAccountStatus(u.getAccountStatus() != null ? u.getAccountStatus().name() : "EN_ATTENTE");
         r.setPhotoUrl(u.getPhotoUrl());
+        // NOUVEAU — exposer le département dans la réponse
+        r.setDepartement(u.getDepartement() != null ? u.getDepartement().getLabel() : null);
         r.setCreatedAt(u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
         return r;
     }
-
 }
