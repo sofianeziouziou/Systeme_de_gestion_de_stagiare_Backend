@@ -33,6 +33,7 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_ENDPOINTS = {
             "/api/v1/auth/**",
+            "/api/v1/password-reset/request",  // ← AJOUTER cette ligne
             "/swagger-ui/**",
             "/api-docs/**",
             "/swagger-ui.html",

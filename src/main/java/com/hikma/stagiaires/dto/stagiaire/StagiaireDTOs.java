@@ -1,6 +1,7 @@
 package com.hikma.stagiaires.dto.stagiaire;
 
 import com.hikma.stagiaires.model.Badge;
+import com.hikma.stagiaires.model.CvData;
 import com.hikma.stagiaires.model.EducationLevel;
 import com.hikma.stagiaires.model.StagiaireStatus;
 import jakarta.validation.constraints.*;
@@ -16,37 +17,17 @@ public class StagiaireDTOs {
 
     @Data
     public static class CreateRequest {
-        @NotBlank
-        private String firstName;
-
-        @NotBlank
-        private String lastName;
-
-        @NotBlank @Email
-        private String email;
-
+        @NotBlank private String firstName;
+        @NotBlank private String lastName;
+        @NotBlank @Email private String email;
         private String phone;
-
-        @NotBlank
-        private String school;
-
-        @NotBlank
-        private String fieldOfStudy;
-
-        @NotNull
-        private EducationLevel level;
-
-        @NotBlank
-        private String departement;
-
+        @NotBlank private String school;
+        @NotBlank private String fieldOfStudy;
+        @NotNull  private EducationLevel level;
+        @NotBlank private String departement;
         private String tuteurId;
-
-        @NotNull
-        private LocalDate startDate;
-
-        @NotNull
-        private LocalDate endDate;
-
+        @NotNull private LocalDate startDate;
+        @NotNull private LocalDate endDate;
         private List<String> technicalSkills;
         private List<String> softSkills;
     }
@@ -66,12 +47,12 @@ public class StagiaireDTOs {
         private List<String> technicalSkills;
         private List<String> softSkills;
         private StagiaireStatus status;
-        private String bio;              // ← ajouter cette ligne
+        private String bio;
     }
 
     @Data
     public static class SearchFilter {
-        private String search;          // ← AJOUTÉ : recherche textuelle (nom, email, école...)
+        private String search;
         private String departement;
         private Double minScore;
         private List<String> competences;
@@ -114,6 +95,13 @@ public class StagiaireDTOs {
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
         private String bio;
+
+        // ── NOUVEAUX CHAMPS SPRINT 3 ──────────────────────────────────
+        private boolean      profileCompleted;
+        private String       currentStep;
+        private List<String> missingFields;
+        private CvData       cvAnalysis;
+        // ─────────────────────────────────────────────────────────────
     }
 
     @Data

@@ -1,4 +1,3 @@
-// src/main/java/com/hikma/sims/exception/GlobalExceptionHandler.java
 package com.hikma.stagiaires.exception;
 
 import lombok.extern.slf4j.Slf4j;
@@ -17,25 +16,16 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    // ── Réponse standard ─────────────────────────────────────────────────
+    private record ApiError(String code, String message, int status, Instant timestamp) {}
 
-    private record ApiError(
-            String  code,
-            String  message,
-            int     status,
-            Instant timestamp
-    ) {}
-
-    private static ResponseEntity<ApiError> error(
-            String code, String message, HttpStatus status
-    ) {
-        return ResponseEntity
-                .status(status)
+    private static ResponseEntity<ApiError> error(String code, String message, HttpStatus status) {
+        return ResponseEntity.status(status)
                 .body(new ApiError(code, message, status.value(), Instant.now()));
     }
 
@@ -63,6 +53,35 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex) {
         log.warn("[SIMS] Accès interdit : {}", ex.getMessage());
         return error(ex.getCode(), ex.getMessage(), HttpStatus.FORBIDDEN);
+    }
+
+    // ── FIX SPRINT 2 : IllegalStateException → 403 au lieu de 500 ────────
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> handleIllegalState(IllegalStateException ex) {
+        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
+        if (msg.contains("attente")) {
+            log.warn("[SIMS] Compte en attente : {}", ex.getMessage());
+            return error("ACCOUNT_PENDING", ex.getMessage(), HttpStatus.FORBIDDEN);
+        }
+        if (msg.contains("désactivé") || msg.contains("refus")) {
+            log.warn("[SIMS] Compte refusé : {}", ex.getMessage());
+            return error("ACCOUNT_REFUSED", ex.getMessage(), HttpStatus.FORBIDDEN);
+        }
+        log.warn("[SIMS] IllegalStateException : {}", ex.getMessage());
+        return error("BUSINESS_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("[SIMS] IllegalArgumentException : {}", ex.getMessage());
+        return error("VALIDATION_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<ApiError> handleNoSuchElement(NoSuchElementException ex) {
+        log.warn("[SIMS] Élément introuvable : {}", ex.getMessage());
+        return error("RESOURCE_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
     // ── Sécurité Spring ───────────────────────────────────────────────────
@@ -108,7 +127,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiError> handleMaxUpload(MaxUploadSizeExceededException ex) {
-        return error("FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée (5 MB).", HttpStatus.PAYLOAD_TOO_LARGE);
+        return error("FILE_TOO_LARGE", "Le fichier dépasse la taille maximale (5 MB).", HttpStatus.PAYLOAD_TOO_LARGE);
     }
 
     // ── Fallback ──────────────────────────────────────────────────────────
@@ -116,31 +135,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleAll(Exception ex) {
         log.error("[SIMS] Erreur inattendue : {}", ex.getMessage(), ex);
-        return error(
-                "INTERNAL_ERROR",
-                "Une erreur interne est survenue. Réessayez ou contactez l'administrateur.",
-                HttpStatus.INTERNAL_SERVER_ERROR
-        );
-    }
-    // AJOUTER ce bloc — avant le handler générique @ExceptionHandler(Exception.class)
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalState(
-            IllegalStateException ex) {
-
-        Map<String, String> body = new HashMap<>();
-        body.put("message", ex.getMessage());
-
-        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
-
-        if (msg.contains("attente") || msg.contains("pending")) {
-            body.put("status", "EN_ATTENTE");
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
-        }
-        if (msg.contains("refus") || msg.contains("désactivé") || msg.contains("disabled")) {
-            body.put("status", "REFUSE");
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
-        }
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+        return error("INTERNAL_ERROR",
+                "Une erreur interne est survenue.",
+                HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

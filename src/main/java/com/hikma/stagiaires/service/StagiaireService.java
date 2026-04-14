@@ -30,6 +30,8 @@ public class StagiaireService {
     private final MongoTemplate        mongoTemplate;
     private final FileStorageService   fileStorageService;
     private final AuditLogService      auditLogService;
+    private final CvAnalysisService    cvAnalysisService;    // ← NOUVEAU
+    private final OnboardingService    onboardingService;    // ← NOUVEAU
 
     // ─── CRUD ────────────────────────────────────────────────────────────
 
@@ -53,10 +55,8 @@ public class StagiaireService {
                 .startDate(req.getStartDate())
                 .endDate(req.getEndDate())
                 .durationMonths((int) months)
-                .technicalSkills(req.getTechnicalSkills() != null
-                        ? req.getTechnicalSkills() : List.of())
-                .softSkills(req.getSoftSkills() != null
-                        ? req.getSoftSkills() : List.of())
+                .technicalSkills(req.getTechnicalSkills() != null ? req.getTechnicalSkills() : List.of())
+                .softSkills(req.getSoftSkills() != null ? req.getSoftSkills() : List.of())
                 .status(StagiaireStatus.EN_COURS)
                 .build();
 
@@ -129,46 +129,28 @@ public class StagiaireService {
         return paged;
     }
 
-    // ── P1 FIX : Ownership check ──────────────────────────────────────────
-    /**
-     * Règles :
-     *  - RH      → peut modifier n'importe quelle fiche
-     *  - TUTEUR  → peut modifier uniquement les fiches de SES stagiaires
-     *  - STAGIAIRE → peut modifier UNIQUEMENT sa propre fiche (userId doit correspondre)
-     */
     public StagiaireResponse update(String id, UpdateRequest req, String callerUserId) {
         Stagiaire s = findActiveById(id);
 
-        // Charger l'appelant pour connaître son rôle
         User caller = userRepository.findById(callerUserId)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable"));
 
         switch (caller.getRole()) {
-
             case STAGIAIRE -> {
-                // Le stagiaire ne peut modifier QUE sa propre fiche
                 if (!callerUserId.equals(s.getUserId())) {
                     throw new AccessDeniedException(
                             "Vous n'êtes pas autorisé à modifier le profil d'un autre stagiaire.");
                 }
             }
-
             case TUTEUR -> {
-                // Le tuteur ne peut modifier que les fiches de ses stagiaires assignés
                 if (!callerUserId.equals(s.getTuteurId())) {
-                    throw new AccessDeniedException(
-                            "Vous n'êtes pas l'encadrant de ce stagiaire.");
+                    throw new AccessDeniedException("Vous n'êtes pas l'encadrant de ce stagiaire.");
                 }
             }
-
-            case RH -> {
-                // RH a accès total — aucune restriction
-            }
-
+            case RH -> { /* accès total */ }
             default -> throw new AccessDeniedException("Rôle non reconnu.");
         }
 
-        // ── Appliquer les modifications ───────────────────────────────────
         if (req.getFirstName()       != null) s.setFirstName(req.getFirstName());
         if (req.getLastName()        != null) s.setLastName(req.getLastName());
         if (req.getPhone()           != null) s.setPhone(req.getPhone());
@@ -182,8 +164,12 @@ public class StagiaireService {
         if (req.getTechnicalSkills() != null) s.setTechnicalSkills(req.getTechnicalSkills());
         if (req.getSoftSkills()      != null) s.setSoftSkills(req.getSoftSkills());
         if (req.getStatus()          != null) s.setStatus(req.getStatus());
-        // bio (si ajouté dans UpdateRequest)
         if (req.getBio()             != null) s.setBio(req.getBio());
+
+        // Recalcul missingFields après update
+        List<String> missing = onboardingService.computeMissingFields(s);
+        s.setMissingFields(missing);
+        s.setProfileCompleted(missing.isEmpty());
 
         Stagiaire saved = stagiaireRepository.save(s);
         auditLogService.log(callerUserId, "UPDATE", "STAGIAIRE", id, null);
@@ -197,10 +183,49 @@ public class StagiaireService {
         auditLogService.log(deletedByUserId, "DELETE", "STAGIAIRE", id, null);
     }
 
+    // ── Upload CV — MODIFIÉ : analyse automatique après upload ────────────
+
     public StagiaireResponse uploadCv(String id, MultipartFile file, String userId) {
+        // Validation type
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.equals("application/pdf")) {
+            throw new IllegalArgumentException("Seuls les fichiers PDF sont acceptés pour le CV.");
+        }
+
         Stagiaire s = findActiveById(id);
+
+        // Upload
         String url = fileStorageService.uploadFile(file, "cv/" + id);
         s.setCvUrl(url);
+
+        // Analyse automatique PDFBox (best-effort)
+        try {
+            CvData analysis = cvAnalysisService.analyze(file);
+            s.setCvAnalysis(analysis);
+
+            // Pré-remplissage si champs vides
+            if (s.getSchool() == null && analysis.getDetectedSchool() != null) {
+                s.setSchool(analysis.getDetectedSchool());
+            }
+            if (s.getLevel() == null && analysis.getDetectedLevel() != null) {
+                try {
+                    s.setLevel(EducationLevel.valueOf(analysis.getDetectedLevel()));
+                } catch (IllegalArgumentException ignored) { }
+            }
+            if ((s.getTechnicalSkills() == null || s.getTechnicalSkills().isEmpty())
+                    && analysis.getDetectedSkills() != null
+                    && !analysis.getDetectedSkills().isEmpty()) {
+                s.setTechnicalSkills(analysis.getDetectedSkills());
+            }
+        } catch (Exception e) {
+            log.warn("[StagiaireService] Analyse CV échouée pour {} : {}", id, e.getMessage());
+        }
+
+        // Recalcul missingFields + profileCompleted
+        List<String> missing = onboardingService.computeMissingFields(s);
+        s.setMissingFields(missing);
+        s.setProfileCompleted(missing.isEmpty());
+
         return toResponse(stagiaireRepository.save(s));
     }
 
@@ -263,6 +288,14 @@ public class StagiaireService {
         r.setStatus(s.getStatus());
         r.setCreatedAt(s.getCreatedAt());
         r.setUpdatedAt(s.getUpdatedAt());
+        r.setBio(s.getBio());
+
+        // ── NOUVEAUX CHAMPS SPRINT 3 ──────────────────────────────────
+        r.setProfileCompleted(s.isProfileCompleted());
+        r.setCurrentStep(s.getCurrentStep() != null ? s.getCurrentStep().name() : null);
+        r.setMissingFields(s.getMissingFields());
+        r.setCvAnalysis(s.getCvAnalysis());
+        // ─────────────────────────────────────────────────────────────
 
         if (s.getTuteurId() != null) {
             userRepository.findById(s.getTuteurId()).ifPresent(u ->

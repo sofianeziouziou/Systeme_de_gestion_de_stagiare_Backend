@@ -36,4 +36,6 @@ public interface StagiaireRepository extends MongoRepository<Stagiaire, String> 
 
     // ── Recherche par département (standard) ─────────────────────────────
     List<Stagiaire> findByDepartementAndDeletedFalse(String departement);
+    long countByTuteurIdAndDeletedFalse(String tuteurId);
+
 }

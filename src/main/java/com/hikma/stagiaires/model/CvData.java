@@ -1,26 +1,27 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/model/CvData.java
+// ACTION      : REMPLACER le fichier complet
+// EXPLICATION : Ajout de languages et experience qui manquaient
+
 package com.hikma.stagiaires.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
+import lombok.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * Données extraites du CV par l'analyse NLP (F4).
- * Stocké comme document embedded dans Stagiaire.
- */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class CvData {
-    private List<String> skills;
-    private String       education;
-    private List<String> languages;
-    private List<String> experience;
-    private String       rawText;
+    private List<String> detectedSkills;
+    private String       detectedSchool;
+    private String       detectedLevel;
+    private List<String> languages;      // ← AJOUTÉ
+    private List<String> experience;     // ← AJOUTÉ
+
+    @Builder.Default
+    private double analysisConfidence = 0.0;
+
     private LocalDateTime analyzedAt;
+    private String        rawText;
 }

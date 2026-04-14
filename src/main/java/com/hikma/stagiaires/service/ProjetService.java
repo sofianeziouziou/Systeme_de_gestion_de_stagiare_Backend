@@ -1,3 +1,11 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/service/ProjetService.java
+// ACTION      : REMPLACER le fichier complet
+// EXPLICATION : Ajout emails critiques :
+//               - Nouveau projet → email tuteur
+//               - Projet terminé → email RH
+//               - Deadline 3 jours → email tuteur + RH
+//               - Projet en retard → email tuteur + RH
+
 package com.hikma.stagiaires.service;
 
 import com.hikma.stagiaires.dto.projet.ProjetDTOs.*;
@@ -25,12 +33,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjetService {
 
-    private final ProjetRepository    projetRepository;
-    private final StagiaireRepository stagiaireRepository;
-    private final UserRepository      userRepository;
-    private final NotificationService notificationService;
-    private final FileStorageService  fileStorageService;
-    private final AuditLogService     auditLogService;
+    private final ProjetRepository         projetRepository;
+    private final StagiaireRepository      stagiaireRepository;
+    private final UserRepository           userRepository;
+    private final NotificationService      notificationService;
+    private final FileStorageService       fileStorageService;
+    private final AuditLogService          auditLogService;
+    private final EmailNotificationService emailNotificationService;
 
     // ── Créer un projet (RH) ──────────────────────────────────────────────
     public ProjetResponse create(CreateRequest req, String rhId) {
@@ -44,14 +53,14 @@ public class ProjetService {
                         .anyMatch(p -> p.getStatus() != ProjetStatus.TERMINE
                                 && p.getStatus() != ProjetStatus.ANNULE);
                 if (hasActive) {
-                    // Trouver le nom via fiche stagiaire ou user directement
                     String nom = stagiaireRepository.findByUserId(userId)
                             .map(s -> s.getFirstName() + " " + s.getLastName())
                             .orElseGet(() -> userRepository.findById(userId)
                                     .map(u -> u.getFirstName() + " " + u.getLastName())
                                     .orElse(userId));
                     throw new IllegalArgumentException(
-                            "Le stagiaire " + nom + " a déjà un projet actif en cours.");
+                            "Le stagiaire " + nom
+                                    + " a déjà un projet actif en cours.");
                 }
             }
         }
@@ -59,39 +68,46 @@ public class ProjetService {
         Projet projet = Projet.builder()
                 .title(req.getTitle())
                 .description(req.getDescription())
-                .stagiaireIds(req.getStagiaireIds())   // stocke userId
+                .stagiaireIds(req.getStagiaireIds())
                 .tuteurId(req.getTuteurId())
                 .startDate(req.getStartDate())
                 .plannedEndDate(req.getPlannedEndDate())
-                .technologies(req.getTechnologies() != null ? req.getTechnologies() : List.of())
+                .technologies(req.getTechnologies() != null
+                        ? req.getTechnologies() : List.of())
                 .sprints(List.of())
                 .build();
 
         Projet saved = projetRepository.save(projet);
         auditLogService.log(rhId, "CREATE", "PROJET", saved.getId(), null);
 
-        // Notifier le tuteur
+        // Notification in-app + email au tuteur
         if (req.getTuteurId() != null) {
             notificationService.createNotification(
                     req.getTuteurId(),
                     NotificationType.PROJET_ASSIGNE,
                     "Nouveau projet assigné",
-                    "Le RH vous a assigné le projet \"" + req.getTitle() + "\".",
+                    "Le RH vous a assigné le projet \""
+                            + req.getTitle() + "\".",
                     saved.getId()
             );
+            // ── Email automatique critique ────────────────────────────
+            emailNotificationService.envoyerEmailNouveauProjet(saved);
         }
 
         return toResponse(saved);
     }
 
     // ── Getters ───────────────────────────────────────────────────────────
+
     public ProjetResponse getById(String id) {
         return toResponse(findActiveById(id));
     }
 
     public Page<ProjetResponse> getAll(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return projetRepository.findByDeletedFalse(pageable).map(this::toResponse);
+        Pageable pageable = PageRequest.of(
+                page, size, Sort.by("createdAt").descending());
+        return projetRepository.findByDeletedFalse(pageable)
+                .map(this::toResponse);
     }
 
     public List<ProjetResponse> getByTuteur(String tuteurId) {
@@ -100,12 +116,13 @@ public class ProjetService {
     }
 
     public List<ProjetResponse> getByStagiaire(String userId) {
-        // userId passé → cherche par stagiaireIds (qui contient des userId)
-        return projetRepository.findByStagiaireIdsContainingAndDeletedFalse(userId)
+        return projetRepository
+                .findByStagiaireIdsContainingAndDeletedFalse(userId)
                 .stream().map(this::toResponse).collect(Collectors.toList());
     }
 
     // ── Update ────────────────────────────────────────────────────────────
+
     public ProjetResponse update(String id, UpdateRequest req, String userId) {
         Projet p = findActiveById(id);
 
@@ -124,6 +141,8 @@ public class ProjetService {
             if (req.getProgress() >= 100) {
                 p.setStatus(ProjetStatus.TERMINE);
                 p.setActualEndDate(LocalDate.now());
+                // ── Email projet terminé → RH ─────────────────────────
+                emailNotificationService.envoyerEmailProjetTermine(p);
             }
         }
 
@@ -135,7 +154,10 @@ public class ProjetService {
     }
 
     // ── Terminer un sprint ────────────────────────────────────────────────
-    public ProjetResponse completeSprint(String projetId, String sprintId, String userId) {
+
+    public ProjetResponse completeSprint(
+            String projetId, String sprintId, String userId) {
+
         Projet p = findActiveById(projetId);
 
         List<Projet.Sprint> updated = p.getSprints().stream().map(s -> {
@@ -146,20 +168,26 @@ public class ProjetService {
         p.setSprints(updated);
 
         long total    = updated.size();
-        long termines = updated.stream().filter(s -> "TERMINE".equals(s.getStatus())).count();
+        long termines = updated.stream()
+                .filter(s -> "TERMINE".equals(s.getStatus())).count();
+
         if (total > 0) {
-            int progress = (int) Math.round((double) termines / total * 100);
+            int progress = (int) Math.round(
+                    (double) termines / total * 100);
             p.setProgress(progress);
             if (progress >= 100) {
                 p.setStatus(ProjetStatus.TERMINE);
                 p.setActualEndDate(LocalDate.now());
+                // ── Email projet terminé → RH ─────────────────────────
+                emailNotificationService.envoyerEmailProjetTermine(p);
             }
         }
 
         return toResponse(projetRepository.save(p));
     }
 
-    public ProjetResponse uploadReport(String id, MultipartFile file, String userId) {
+    public ProjetResponse uploadReport(
+            String id, MultipartFile file, String userId) {
         Projet p = findActiveById(id);
         String url = fileStorageService.uploadFile(file, "rapports/" + id);
         p.setReportUrl(url);
@@ -175,73 +203,114 @@ public class ProjetService {
     }
 
     // ── Scheduler ─────────────────────────────────────────────────────────
+
     @Scheduled(cron = "0 0 8 * * *")
     public void checkProjectDeadlines() {
         LocalDate today   = LocalDate.now();
+        LocalDate in3Days = today.plusDays(3);
         LocalDate in7Days = today.plusDays(7);
 
+        // ── Deadline critique dans 3 jours → email tuteur + RH ───────
         projetRepository
-                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(ProjetStatus.EN_COURS, today, in7Days)
-                .forEach(p -> notificationService.notifyDeadlineProche(p));
+                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+                        ProjetStatus.EN_COURS, today, in3Days)
+                .forEach(p -> {
+                    notificationService.notifyDeadlineProche(p);
+                    emailNotificationService.envoyerEmailDeadlineProche(p);
+                });
 
-        List<ProjetStatus> exclus = List.of(ProjetStatus.TERMINE, ProjetStatus.ANNULE, ProjetStatus.SUSPENDU);
+        // ── Deadline entre 3 et 7 jours → notification seule ─────────
         projetRepository
-                .findByDeletedFalseAndStatusNotInAndPlannedEndDateBefore(exclus, today)
+                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+                        ProjetStatus.EN_COURS, in3Days, in7Days)
+                .forEach(p ->
+                        notificationService.notifyDeadlineProche(p));
+
+        // ── Projets en retard → email tuteur + RH ────────────────────
+        List<ProjetStatus> exclus = List.of(
+                ProjetStatus.TERMINE,
+                ProjetStatus.ANNULE,
+                ProjetStatus.SUSPENDU);
+
+        projetRepository
+                .findByDeletedFalseAndStatusNotInAndPlannedEndDateBefore(
+                        exclus, today)
                 .forEach(p -> {
                     if (!ProjetStatus.EN_RETARD.equals(p.getStatus())) {
                         p.setStatus(ProjetStatus.EN_RETARD);
                         projetRepository.save(p);
+                        // Email envoyé 1 seule fois au changement statut
+                        emailNotificationService.envoyerEmailProjetEnRetard(p);
                     }
                     notificationService.notifyProjetEnRetard(p);
                 });
 
+        // ── Sans mise à jour depuis 5 jours → notification seule ─────
         LocalDateTime fiveDaysAgo = LocalDateTime.now().minusDays(5);
         projetRepository
-                .findByDeletedFalseAndStatusAndUpdatedAtBefore(ProjetStatus.EN_COURS, fiveDaysAgo)
-                .forEach(p -> notificationService.notifySansMiseAJour(p));
+                .findByDeletedFalseAndStatusAndUpdatedAtBefore(
+                        ProjetStatus.EN_COURS, fiveDaysAgo)
+                .forEach(p ->
+                        notificationService.notifySansMiseAJour(p));
 
-        projetRepository.findByDeletedFalse(Pageable.unpaged()).forEach(p -> {
-            if (p.getSprints() == null || p.getSprints().isEmpty()) return;
-            boolean changed = false;
-            for (Projet.Sprint sprint : p.getSprints()) {
-                if ("TERMINE".equals(sprint.getStatus())) continue;
-                if (sprint.getEndDate() != null && sprint.getEndDate().isBefore(today)) {
-                    sprint.setStatus("EN_RETARD");
-                    changed = true;
-                    notificationService.createNotification(
-                            p.getTuteurId(), NotificationType.PROJET_EN_RETARD,
-                            "Sprint en retard",
-                            "Le sprint \"" + sprint.getTitle() + "\" du projet \""
-                                    + p.getTitle() + "\" a dépassé sa date de fin.",
-                            p.getId());
-                }
-            }
-            if (changed) projetRepository.save(p);
-        });
+        // ── Sprints en retard ─────────────────────────────────────────
+        projetRepository.findByDeletedFalse(Pageable.unpaged())
+                .forEach(p -> {
+                    if (p.getSprints() == null
+                            || p.getSprints().isEmpty()) return;
 
+                    boolean changed = false;
+                    for (Projet.Sprint sprint : p.getSprints()) {
+                        if ("TERMINE".equals(sprint.getStatus())) continue;
+                        if (sprint.getEndDate() != null
+                                && sprint.getEndDate().isBefore(today)) {
+                            sprint.setStatus("EN_RETARD");
+                            changed = true;
+                            notificationService.createNotification(
+                                    p.getTuteurId(),
+                                    NotificationType.PROJET_EN_RETARD,
+                                    "Sprint en retard",
+                                    "Le sprint \"" + sprint.getTitle()
+                                            + "\" du projet \""
+                                            + p.getTitle()
+                                            + "\" a depasse sa date de fin.",
+                                    p.getId());
+                        }
+                    }
+                    if (changed) projetRepository.save(p);
+                });
+
+        // ── Rappel rapport 7 jours → notification seule ───────────────
         projetRepository
-                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(ProjetStatus.EN_COURS, today, in7Days)
-                .forEach(p -> notificationService.createNotification(
-                        p.getTuteurId(), NotificationType.RAPPEL_RAPPORT,
-                        "Rappel : évaluation à venir",
-                        "Le projet \"" + p.getTitle() + "\" se termine dans moins de 7 jours.",
-                        p.getId()));
+                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+                        ProjetStatus.EN_COURS, today, in7Days)
+                .forEach(p ->
+                        notificationService.createNotification(
+                                p.getTuteurId(),
+                                NotificationType.RAPPEL_RAPPORT,
+                                "Rappel : evaluation a venir",
+                                "Le projet \"" + p.getTitle()
+                                        + "\" se termine dans moins de 7 jours.",
+                                p.getId()));
 
-        log.info("checkProjectDeadlines terminé — {}", today);
+        log.info("[SCHEDULER] checkProjectDeadlines termine — {}", today);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
     private List<Projet.Sprint> buildSprints(List<SprintRequest> requests) {
         if (requests == null) return new ArrayList<>();
         return requests.stream().map(r -> {
             Projet.Sprint s = new Projet.Sprint();
-            s.setId(r.getId() != null ? r.getId() : UUID.randomUUID().toString());
+            s.setId(r.getId() != null
+                    ? r.getId() : UUID.randomUUID().toString());
             s.setTitle(r.getTitle());
             s.setDescription(r.getDescription());
             s.setStartDate(r.getStartDate());
             s.setEndDate(r.getEndDate());
-            s.setStagiaireId(r.getStagiaireId());     // ← assignation stagiaire par sprint
-            s.setStatus(r.getStatus() != null ? r.getStatus() : "EN_COURS");
+            s.setStagiaireId(r.getStagiaireId());
+            s.setStatus(r.getStatus() != null
+                    ? r.getStatus() : "EN_COURS");
             return s;
         }).collect(Collectors.toList());
     }
@@ -249,7 +318,8 @@ public class ProjetService {
     private Projet findActiveById(String id) {
         return projetRepository.findById(id)
                 .filter(p -> !p.isDeleted())
-                .orElseThrow(() -> new NoSuchElementException("Projet introuvable : " + id));
+                .orElseThrow(() ->
+                        new NoSuchElementException("Projet introuvable : " + id));
     }
 
     public ProjetResponse toResponse(Projet p) {
@@ -281,18 +351,21 @@ public class ProjetService {
                 sr.setStartDate(s.getStartDate());
                 sr.setEndDate(s.getEndDate());
                 sr.setStatus(s.getStatus());
-                sr.setStagiaireId(s.getStagiaireId());  // ← inclus dans la réponse
+                sr.setStagiaireId(s.getStagiaireId());
                 sr.setOverdue(!("TERMINE".equals(s.getStatus()))
                         && s.getEndDate() != null
                         && s.getEndDate().isBefore(today));
 
-                // Résoudre le nom du stagiaire assigné au sprint
                 if (s.getStagiaireId() != null) {
                     stagiaireRepository.findByUserId(s.getStagiaireId())
-                            .ifPresent(st -> sr.setStagiaireName(st.getFirstName() + " " + st.getLastName()));
+                            .ifPresent(st -> sr.setStagiaireName(
+                                    st.getFirstName() + " "
+                                            + st.getLastName()));
                     if (sr.getStagiaireName() == null) {
                         userRepository.findById(s.getStagiaireId())
-                                .ifPresent(u -> sr.setStagiaireName(u.getFirstName() + " " + u.getLastName()));
+                                .ifPresent(u -> sr.setStagiaireName(
+                                        u.getFirstName() + " "
+                                                + u.getLastName()));
                     }
                 }
                 return sr;
@@ -302,31 +375,34 @@ public class ProjetService {
         // Nom du tuteur
         if (p.getTuteurId() != null) {
             userRepository.findById(p.getTuteurId())
-                    .ifPresent(u -> r.setTuteurName(u.getFirstName() + " " + u.getLastName()));
+                    .ifPresent(u -> r.setTuteurName(
+                            u.getFirstName() + " " + u.getLastName()));
         }
 
-        // ── CORRECTION : stagiaires — stagiaireIds contient des userId ──────
+        // Stagiaires
         if (p.getStagiaireIds() != null) {
             r.setStagiaires(p.getStagiaireIds().stream()
                     .map(userId -> {
-                        // 1. Chercher fiche stagiaire par userId
                         return stagiaireRepository.findByUserId(userId)
                                 .map(s -> {
-                                    ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
-                                    si.setId(userId);                  // userId pour cohérence
+                                    ProjetResponse.StagiaireInfo si =
+                                            new ProjetResponse.StagiaireInfo();
+                                    si.setId(userId);
                                     si.setFirstName(s.getFirstName());
                                     si.setLastName(s.getLastName());
                                     si.setPhotoUrl(s.getPhotoUrl());
                                     return si;
                                 })
-                                // 2. Fallback : chercher dans User si fiche absente
-                                .orElseGet(() -> userRepository.findById(userId).map(u -> {
-                                    ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
-                                    si.setId(userId);
-                                    si.setFirstName(u.getFirstName());
-                                    si.setLastName(u.getLastName());
-                                    return si;
-                                }).orElse(null));
+                                .orElseGet(() ->
+                                        userRepository.findById(userId)
+                                                .map(u -> {
+                                                    ProjetResponse.StagiaireInfo si =
+                                                            new ProjetResponse.StagiaireInfo();
+                                                    si.setId(userId);
+                                                    si.setFirstName(u.getFirstName());
+                                                    si.setLastName(u.getLastName());
+                                                    return si;
+                                                }).orElse(null));
                     })
                     .filter(si -> si != null)
                     .collect(Collectors.toList()));

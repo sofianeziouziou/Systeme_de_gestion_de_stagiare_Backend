@@ -24,7 +24,6 @@ public class Stagiaire {
     @Id
     private String id;
 
-    // Informations personnelles
     private String firstName;
     private String lastName;
 
@@ -34,36 +33,37 @@ public class Stagiaire {
     private String phone;
     private String photoUrl;
 
-    // Informations académiques
     private String school;
     private String fieldOfStudy;
     private EducationLevel level;
 
-    // Informations de stage
-    // NOTE: garde String pour compatibilité MongoDB (données existantes)
-    // La conversion String→Departement se fait dans StagiaireService
     private String departement;
     private String tuteurId;
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer durationMonths;
 
-    // Compétences
     @Builder.Default
     private List<String> technicalSkills = List.of();
 
     @Builder.Default
     private List<String> softSkills = List.of();
 
-    // Documents
     private String cvUrl;
     private String bio;
 
+    // ── NOUVEAUX CHAMPS SPRINT 3 ──────────────────────────────────────
+    @Builder.Default
+    private boolean profileCompleted = false;
 
-    /** NOUVEAU — analyse CV (préparation F4) */
+    private OnboardingStep currentStep;
+
+    @Builder.Default
+    private List<String> missingFields = List.of();
+
     private CvData cvAnalysis;
+    // ──────────────────────────────────────────────────────────────────
 
-    // Score et évaluation
     @Builder.Default
     private Double globalScore = 0.0;
 
@@ -72,22 +72,13 @@ public class Stagiaire {
     @Builder.Default
     private List<ScoreHistory> scoreHistory = List.of();
 
-    // Statut
     @Builder.Default
     private StagiaireStatus status = StagiaireStatus.EN_COURS;
-    
 
     @Builder.Default
     private boolean deleted = false;
 
-    // Référence utilisateur (pour login)
     private String userId;
-
-    /** NOUVEAU — onboarding F2 */
-    @Builder.Default
-    private boolean profileCompleted = false;
-
-    private List<String> missingFields;
 
     @CreatedDate
     private LocalDateTime createdAt;
@@ -95,7 +86,6 @@ public class Stagiaire {
     @LastModifiedDate
     private LocalDateTime updatedAt;
 
-    // Classe interne pour l'historique du score
     @Data
     @AllArgsConstructor
     @NoArgsConstructor
