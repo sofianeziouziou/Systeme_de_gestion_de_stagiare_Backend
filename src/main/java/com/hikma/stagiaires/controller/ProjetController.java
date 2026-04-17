@@ -1,3 +1,4 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/controller/ProjetController.java
 package com.hikma.stagiaires.controller;
 
 import com.hikma.stagiaires.dto.projet.ProjetDTOs.*;
@@ -144,5 +145,74 @@ public class ProjetController {
     public ResponseEntity<String> triggerDeadlineCheck() {
         projetService.checkProjectDeadlines();
         return ResponseEntity.ok("Vérification effectuée.");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // NOUVEAU — Workflow acceptation tuteur
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Tuteur accepte un projet
+     * PATCH /api/v1/projets/{id}/accept
+     * Body (optionnel) : { "message": "..." }
+     */
+    @PatchMapping("/{id}/accept")
+    @PreAuthorize("hasRole('TUTEUR')")
+    public ResponseEntity<ProjetResponse> accepter(
+            @PathVariable String id,
+            @RequestBody(required = false) AcceptRequest req,
+            @AuthenticationPrincipal User currentUser) {
+        String message = req != null ? req.getMessage() : null;
+        return ResponseEntity.ok(projetService.accepter(id, currentUser.getId(), message));
+    }
+
+    /**
+     * Tuteur refuse un projet
+     * PATCH /api/v1/projets/{id}/refuse
+     * Body : { "raison": "..." }
+     */
+    @PatchMapping("/{id}/refuse")
+    @PreAuthorize("hasRole('TUTEUR')")
+    public ResponseEntity<ProjetResponse> refuser(
+            @PathVariable String id,
+            @RequestBody RefuseRequest req,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(projetService.refuser(id, currentUser.getId(), req.getRaison()));
+    }
+
+    /**
+     * RH réassigne un tuteur sur un projet refusé
+     * PATCH /api/v1/projets/{id}/reassign-tuteur
+     * Body : { "nouveauTuteurId": "..." }
+     */
+    @PatchMapping("/{id}/reassign-tuteur")
+    @PreAuthorize("hasRole('RH')")
+    public ResponseEntity<ProjetResponse> reassignerTuteur(
+            @PathVariable String id,
+            @RequestBody ReassignTuteurRequest req,
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(
+                projetService.reassignerTuteur(id, req.getTuteurId(), currentUser.getId()));
+    }
+
+    /**
+     * Projets en attente d'acceptation pour le tuteur connecté
+     * GET /api/v1/projets/pending-acceptance
+     */
+    @GetMapping("/pending-acceptance")
+    @PreAuthorize("hasRole('TUTEUR')")
+    public ResponseEntity<List<ProjetResponse>> getPendingAcceptance(
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(projetService.getPendingForTuteur(currentUser.getId()));
+    }
+
+    /**
+     * Projets refusés (pour que le RH puisse les réassigner)
+     * GET /api/v1/projets/refused
+     */
+    @GetMapping("/refused")
+    @PreAuthorize("hasRole('RH')")
+    public ResponseEntity<List<ProjetResponse>> getRefused() {
+        return ResponseEntity.ok(projetService.getRefusedProjets());
     }
 }

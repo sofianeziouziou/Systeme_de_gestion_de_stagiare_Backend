@@ -1,3 +1,4 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/dto/stagiaire/StagiaireDTOs.java
 package com.hikma.stagiaires.dto.stagiaire;
 
 import com.hikma.stagiaires.model.Badge;
@@ -71,7 +72,8 @@ public class StagiaireDTOs {
 
     @Data
     public static class StagiaireResponse {
-        private String id;
+        private String id;          // stagiaires._id
+        private String userId;      // FIX : users._id — à utiliser pour stagiaireIds du projet
         private String firstName;
         private String lastName;
         private String email;

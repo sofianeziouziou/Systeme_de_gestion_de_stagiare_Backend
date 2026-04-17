@@ -1,3 +1,4 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/controller/TuteurController.java
 package com.hikma.stagiaires.controller;
 
 import com.hikma.stagiaires.model.AccountStatus;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -43,32 +45,34 @@ public class TuteurController {
             } catch (IllegalArgumentException ignored) {}
         }
 
-        // 3. Filtrer par recherche (nom / email)
+        // 3. Filtrer par recherche
         if (search != null && !search.isBlank()) {
             String q = search.toLowerCase();
             tuteurs = tuteurs.stream()
                     .filter(t ->
                             (t.getFirstName() + " " + t.getLastName())
                                     .toLowerCase().contains(q) ||
-                                    t.getEmail().toLowerCase().contains(q)
-                    )
+                                    t.getEmail().toLowerCase().contains(q))
                     .collect(Collectors.toList());
         }
 
-        // 4. Construire la réponse avec nb stagiaires
+        // 4. Construire la réponse
+        // FIX : utiliser HashMap au lieu de Map.of() car Map.of() rejette les valeurs null
         List<Map<String, Object>> result = tuteurs.stream().map(t -> {
             long nbStagiaires = stagiaireRepository
                     .countByTuteurIdAndDeletedFalse(t.getId());
 
-            return Map.<String, Object>of(
-                    "id",           t.getId(),
-                    "firstName",    t.getFirstName(),
-                    "lastName",     t.getLastName(),
-                    "email",        t.getEmail(),
-                    "phone",        t.getPhone()        != null ? t.getPhone()                  : "",
-                    "departement",  t.getDepartement()  != null ? t.getDepartement().name()     : "",
-                    "nbStagiaires", nbStagiaires
-            );
+            Map<String, Object> map = new HashMap<>();
+            map.put("id",           t.getId());
+            map.put("firstName",    t.getFirstName());
+            map.put("lastName",     t.getLastName());
+            map.put("email",        t.getEmail() != null        ? t.getEmail()                      : "");
+            map.put("phone",        t.getPhone() != null        ? t.getPhone()                      : "");
+            // FIX : retourner le label lisible du département (ex: "IT", "Finance")
+            // null → chaîne vide pour éviter le crash Map.of()
+            map.put("departement",  t.getDepartement() != null  ? t.getDepartement().getLabel()     : "");
+            map.put("nbStagiaires", nbStagiaires);
+            return map;
         }).collect(Collectors.toList());
 
         return ResponseEntity.ok(result);

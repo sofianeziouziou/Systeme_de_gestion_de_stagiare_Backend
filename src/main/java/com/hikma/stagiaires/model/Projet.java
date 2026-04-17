@@ -1,3 +1,4 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/model/Projet.java
 package com.hikma.stagiaires.model;
 
 import lombok.*;
@@ -23,13 +24,22 @@ public class Projet {
     private LocalDate plannedEndDate;
     private LocalDate actualEndDate;
 
-    /** NOUVEAU — département du projet */
     private String departement;
 
-    @Builder.Default private Integer progress = 0;
-    @Builder.Default private List<Sprint> sprints = List.of();
-    @Builder.Default private ProjetStatus status = ProjetStatus.EN_COURS;
+    @Builder.Default private Integer    progress   = 0;
+    @Builder.Default private List<Sprint> sprints  = List.of();
+    @Builder.Default private ProjetStatus status   = ProjetStatus.EN_COURS;
     @Builder.Default private List<String> technologies = List.of();
+
+    // ── NOUVEAU : statut d'acceptation tuteur ─────────────────────────────
+    // PENDING  = en attente de réponse du tuteur (état initial)
+    // ACCEPTED = tuteur a accepté → projet actif
+    // REFUSED  = tuteur a refusé → RH doit choisir un autre tuteur
+    @Builder.Default
+    private TuteurAcceptation tuteurAcceptation = TuteurAcceptation.PENDING;
+
+    // Raison du refus (optionnel, renseigné par le tuteur)
+    private String tuteurRefusRaison;
 
     private String reportUrl;
     private LocalDate reportSubmittedAt;
@@ -49,5 +59,12 @@ public class Projet {
         private String stagiaireId;
         @Builder.Default
         private String status = "EN_COURS";
+    }
+
+    // ── Enum acceptation ──────────────────────────────────────────────────
+    public enum TuteurAcceptation {
+        PENDING,   // En attente
+        ACCEPTED,  // Accepté par le tuteur
+        REFUSED    // Refusé par le tuteur
     }
 }

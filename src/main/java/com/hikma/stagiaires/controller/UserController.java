@@ -1,9 +1,12 @@
+// DESTINATION : src/main/java/com/hikma/stagiaires/controller/UserController.java
 package com.hikma.stagiaires.controller;
 
 import com.hikma.stagiaires.model.AccountStatus;
 import com.hikma.stagiaires.model.Departement;
 import com.hikma.stagiaires.model.Role;
+import com.hikma.stagiaires.model.Stagiaire;
 import com.hikma.stagiaires.model.User;
+import com.hikma.stagiaires.repository.StagiaireRepository;
 import com.hikma.stagiaires.repository.UserRepository;
 import com.hikma.stagiaires.service.AuditLogService;
 import com.hikma.stagiaires.service.StagiaireService;
@@ -18,6 +21,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -29,10 +33,11 @@ import java.util.stream.Collectors;
 @Tag(name = "Users", description = "Gestion des comptes utilisateurs")
 public class UserController {
 
-    private final UserRepository   userRepository;
-    private final AuditLogService  auditLogService;
-    private final StagiaireService stagiaireService;
-    private final PasswordEncoder  passwordEncoder;
+    private final UserRepository      userRepository;
+    private final AuditLogService     auditLogService;
+    private final StagiaireService    stagiaireService;
+    private final StagiaireRepository stagiaireRepository;   // FIX : ajouté
+    private final PasswordEncoder     passwordEncoder;
 
     // ── Demandes en attente (RH) ─────────────────────────────────────────────
     @GetMapping("/pending")
@@ -75,8 +80,30 @@ public class UserController {
         userRepository.save(user);
 
         if (Role.STAGIAIRE.equals(user.getRole())) {
-            try { stagiaireService.createFicheForUser(user); }
-            catch (Exception ignored) {}
+            try {
+                // 1. Créer la fiche si elle n'existe pas
+                stagiaireService.createFicheForUser(user);
+
+                // 2. FIX : calculer startDate/endDate depuis durationMonths
+                stagiaireRepository.findByUserId(user.getId()).ifPresent(stagiaire -> {
+                    Integer durationMonths = stagiaire.getDurationMonths();
+
+                    // Calculer seulement si durée renseignée et dates pas encore fixées
+                    if (durationMonths != null && durationMonths > 0
+                            && stagiaire.getStartDate() == null) {
+                        LocalDate startDate = LocalDate.now();
+                        LocalDate endDate   = startDate.plusMonths(durationMonths);
+                        stagiaire.setStartDate(startDate);
+                        stagiaire.setEndDate(endDate);
+                        stagiaireRepository.save(stagiaire);
+                        log.info("[APPROVE] Dates calculées pour userId={} : {} → {} ({} mois)",
+                                user.getId(), startDate, endDate, durationMonths);
+                    }
+                });
+
+            } catch (Exception e) {
+                log.warn("[APPROVE] Erreur calcul dates stagiaire userId={} : {}", id, e.getMessage());
+            }
         }
 
         auditLogService.log(currentUser.getId(), "APPROVE_USER", "USER", id, null);
@@ -199,6 +226,12 @@ public class UserController {
             currentUser.setLastName(req.getLastName());
         if (req.getPhone() != null)
             currentUser.setPhone(req.getPhone());
+        if (req.getDepartement() != null && !req.getDepartement().isBlank()) {
+            try {
+                currentUser.setDepartement(
+                        com.hikma.stagiaires.model.Departement.fromString(req.getDepartement()));
+            } catch (IllegalArgumentException ignored) {}
+        }
 
         userRepository.save(currentUser);
         return ResponseEntity.ok(toResponse(currentUser));
@@ -220,13 +253,13 @@ public class UserController {
         return ResponseEntity.ok().build();
     }
 
-    // ── Liste tuteurs approuvés — MODIFIÉ : filtre département optionnel ────
+    // ── Liste tuteurs approuvés ──────────────────────────────────────────────
     @GetMapping("/tuteurs")
     @PreAuthorize("hasRole('RH')")
     @Operation(summary = "Tuteurs approuvés, filtrables par département")
     public ResponseEntity<List<UserResponse>> getTuteurs(
-            @RequestParam(required = false) String departement
-    ) {
+            @RequestParam(required = false) String departement) {
+
         List<UserResponse> tuteurs = userRepository.findAll().stream()
                 .filter(u -> Role.TUTEUR.equals(u.getRole())
                         && AccountStatus.APPROUVE.equals(u.getAccountStatus()))
@@ -263,7 +296,7 @@ public class UserController {
     }
 
     @Data public static class UpdateMeRequest {
-        private String firstName, lastName, phone;
+        private String firstName, lastName, phone, departement;
     }
 
     @Data public static class ChangePasswordRequest {
@@ -280,9 +313,12 @@ public class UserController {
         r.setRole(u.getRole().name());
         r.setAccountStatus(u.getAccountStatus() != null ? u.getAccountStatus().name() : "EN_ATTENTE");
         r.setPhotoUrl(u.getPhotoUrl());
-        // NOUVEAU — exposer le département dans la réponse
         r.setDepartement(u.getDepartement() != null ? u.getDepartement().getLabel() : null);
         r.setCreatedAt(u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
         return r;
     }
+
+    // ── Logger ─────────────────────────────────────────────────────────────
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(UserController.class);
 }
