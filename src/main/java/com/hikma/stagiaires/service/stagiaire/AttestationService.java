@@ -98,7 +98,7 @@ public class AttestationService {
                 cs.stroke();
 
                 // ── En-tête société ───────────────────────────────────────
-                drawCenteredText(cs, "HIKMA PHARMACEUTICALS", W, H - 90,
+                drawCenteredText(cs, "SIMS", W, H - 90,
                         new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 16f,
                         0.11f, 0.30f, 0.69f);
 
@@ -133,7 +133,7 @@ public class AttestationService {
                 PDType1Font fontBold   = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
 
                 drawCenteredText(cs,
-                        "Le département des Ressources Humaines de Hikma Pharmaceuticals",
+                        "Le département des Ressources Humaines ",
                         W, yStart, fontNormal, 11f, 0.1f, 0.1f, 0.1f);
                 drawCenteredText(cs, "atteste que :",
                         W, yStart - lineH, fontNormal, 11f, 0.1f, 0.1f, 0.1f);
@@ -201,7 +201,7 @@ public class AttestationService {
                         W, closeY - lineH, fontNormal, 11f, 0.1f, 0.1f, 0.1f);
 
                 // ── Date d'émission ───────────────────────────────────────
-                String dateEmission = "Fait à Casablanca, le " +
+                String dateEmission = "Fait à Sidi Thabet , Ariana, le " +
                         java.time.LocalDate.now().format(FMT);
                 drawCenteredText(cs, dateEmission, W, closeY - lineH * 3,
                         fontNormal, 10f, 0.4f, 0.4f, 0.4f);
@@ -237,7 +237,7 @@ public class AttestationService {
                 cs.stroke();
 
                 drawCenteredText(cs,
-                        "Hikma Pharmaceuticals — SIMS | Document généré automatiquement",
+                        " SIMS | Document généré automatiquement",
                         W, 52, fontNormal, 8f, 0.5f, 0.5f, 0.5f);
 
                 drawCenteredText(cs,

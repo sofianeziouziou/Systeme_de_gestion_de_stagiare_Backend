@@ -238,7 +238,7 @@ public class ReunionService {
         };
         return "<html><body style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px'>"
                 + "<div style='background:" + couleur + ";padding:20px;border-radius:12px 12px 0 0;text-align:center'>"
-                + "<h1 style='color:white;margin:0;font-size:20px'>Hikma Pharmaceuticals — SIMS</h1></div>"
+                + "<h1 style='color:white;margin:0;font-size:20px'>— SIMS</h1></div>"
                 + "<div style='background:white;padding:28px;border:1px solid #e2e8f0;border-radius:0 0 12px 12px'>"
                 + "<h2 style='color:#1e293b;margin:0 0 16px'>" + titre + "</h2>"
                 + "<div style='background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:16px 0'>"
@@ -249,7 +249,7 @@ public class ReunionService {
                 + "<p style='margin:4px 0 0;color:#374151'>👤 " + personne + "</p>"
                 + "</div>"
                 + "<hr style='border:none;border-top:1px solid #e2e8f0;margin:24px 0'/>"
-                + "<p style='font-size:12px;color:#94a3b8;text-align:center'>Email automatique — SIMS Hikma Pharmaceuticals</p>"
+                + "<p style='font-size:12px;color:#94a3b8;text-align:center'>Email automatique — SIMS </p>"
                 + "</div></body></html>";
     }
 }

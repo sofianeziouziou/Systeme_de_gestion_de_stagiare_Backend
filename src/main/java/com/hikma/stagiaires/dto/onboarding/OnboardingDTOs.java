@@ -21,6 +21,7 @@ public class OnboardingDTOs {
         private String lastName;
         private String phone;
         private String bio;
+        private Integer durationMonths;
 
         // Étape 2
         private String         school;

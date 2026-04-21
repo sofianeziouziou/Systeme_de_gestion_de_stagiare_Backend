@@ -230,7 +230,7 @@ public class SearchService {
 
             helper.setTo(req.getEmailStagiaire());
             helper.setSubject(
-                    "Opportunite de recrutement - Hikma Pharmaceuticals");
+                    "Opportunite de recrutement - ");
 
             String poste = (req.getPostePropose() != null
                     && !req.getPostePropose().isBlank())
@@ -284,7 +284,7 @@ public class SearchService {
                 + "<div style='background:#1d4ed8;padding:24px;"
                 + "border-radius:12px 12px 0 0;text-align:center'>"
                 + "<h1 style='color:white;margin:0;font-size:22px'>"
-                + "Hikma Pharmaceuticals</h1>"
+                + "SIMS</h1>"
                 + "<p style='color:#bfdbfe;margin:8px 0 0;font-size:14px'>"
                 + "Systeme Intelligent de Gestion des Stagiaires</p>"
                 + "</div>"
@@ -298,8 +298,7 @@ public class SearchService {
 
                 + "<p style='color:#374151;line-height:1.7'>"
                 + "Nous avons examine votre profil avec attention dans le cadre "
-                + "de notre processus de recrutement chez "
-                + "<strong>Hikma Pharmaceuticals</strong>.</p>"
+                + "de notre processus de recrutement  "
 
                 + "<p style='color:#374151;line-height:1.7'>"
                 + "Votre parcours et vos competences nous ont particulierement "
@@ -332,7 +331,7 @@ public class SearchService {
                 + "<p style='font-size:13px;color:#94a3b8;text-align:center'>"
                 + "Cet email a ete envoye par <strong>"
                 + rhPrenom + " " + rhNom
-                + "</strong> - Departement RH, Hikma Pharmaceuticals.<br/>"
+                + "</strong> - Departement RH.<br/>"
                 + "Si vous ne souhaitez pas etre contacte(e), "
                 + "ignorez simplement cet email.</p>"
 

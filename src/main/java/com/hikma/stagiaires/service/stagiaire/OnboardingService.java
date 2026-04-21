@@ -39,6 +39,8 @@ public class OnboardingService {
                 if (req.getLastName()  != null) s.setLastName(req.getLastName().trim());
                 if (req.getPhone()     != null) s.setPhone(req.getPhone().trim());
                 if (req.getBio()       != null) s.setBio(req.getBio().trim());
+                if (req.getDurationMonths() != null) s.setDurationMonths(req.getDurationMonths());
+
                 s.setCurrentStep(OnboardingStep.FORMATION);
             }
 

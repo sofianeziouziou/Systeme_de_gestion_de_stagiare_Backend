@@ -30,13 +30,11 @@ public class CalendrierService {
     public List<CalendrierEventDTO> getEvenementsTuteur(String tuteurId) {
         List<CalendrierEventDTO> events = new ArrayList<>();
 
-        // 1. Réunions du tuteur (sauf ANNULEE)
         for (Reunion r : reunionRepository.findByTuteurId(tuteurId)) {
             CalendrierEventDTO dto = fromReunion(r, true);
             if (dto != null) events.add(dto);
         }
 
-        // 2. Projets → sprints + dates stages
         for (Projet p : projetRepository.findByTuteurIdAndDeletedFalse(tuteurId)) {
 
             if (p.getSprints() != null) {
@@ -46,8 +44,8 @@ public class CalendrierService {
                     events.add(CalendrierEventDTO.builder()
                             .id("sprint-" + sprint.getId())
                             .title("Sprint : " + sprint.getTitle())
-                            .start(sprint.getEndDate().atStartOfDay())
-                            .end(sprint.getEndDate().atTime(23, 59))
+                            .start(sprint.getEndDate().atTime(8, 30))
+                            .end(sprint.getEndDate().atTime(17, 0))
                             .type("SPRINT_DEADLINE")
                             .color(enRetard ? "#EF4444" : "#F59E0B")
                             .projetId(p.getId())
@@ -75,13 +73,11 @@ public class CalendrierService {
     public List<CalendrierEventDTO> getEvenementsStagiaire(String stagiaireId) {
         List<CalendrierEventDTO> events = new ArrayList<>();
 
-        // 1. Réunions (sauf ANNULEE)
         for (Reunion r : reunionRepository.findByStagiaireIdsContaining(stagiaireId)) {
             CalendrierEventDTO dto = fromReunion(r, false);
             if (dto != null) events.add(dto);
         }
 
-        // 2. Fiche stagiaire → dates + sprints
         stagiaireRepository.findById(stagiaireId).ifPresent(s -> {
             events.addAll(buildStageEvents(s, null, false));
 
@@ -101,8 +97,8 @@ public class CalendrierService {
                         events.add(CalendrierEventDTO.builder()
                                 .id("sprint-" + sprint.getId())
                                 .title("Sprint : " + sprint.getTitle())
-                                .start(sprint.getEndDate().atStartOfDay())
-                                .end(sprint.getEndDate().atTime(23, 59))
+                                .start(sprint.getEndDate().atTime(8, 30))
+                                .end(sprint.getEndDate().atTime(17, 0))
                                 .type("SPRINT_DEADLINE")
                                 .color(enRetard ? "#EF4444" : "#F59E0B")
                                 .projetId(p.getId())
@@ -124,13 +120,11 @@ public class CalendrierService {
     public List<CalendrierEventDTO> getEvenementsRh() {
         List<CalendrierEventDTO> events = new ArrayList<>();
 
-        // Réunions (sauf ANNULEE)
         for (Reunion r : reunionRepository.findAll()) {
             CalendrierEventDTO dto = fromReunion(r, false);
             if (dto != null) events.add(dto);
         }
 
-        // Tous les stages
         for (Stagiaire s : stagiaireRepository.findByDeletedFalse()) {
             events.addAll(buildStageEvents(s, null, false));
         }
@@ -143,13 +137,9 @@ public class CalendrierService {
     // HELPERS
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Retourne null si la réunion est ANNULEE — elle ne sera pas affichée.
-     */
     private CalendrierEventDTO fromReunion(Reunion r, boolean editable) {
         String statut = r.getStatut() != null ? r.getStatut() : "PLANIFIEE";
 
-        // ✅ Réunions annulées → non affichées
         if ("ANNULEE".equals(statut)) return null;
 
         String color = switch (statut) {
@@ -180,12 +170,13 @@ public class CalendrierService {
         List<CalendrierEventDTO> events = new ArrayList<>();
         String nom = s.getFirstName() + " " + s.getLastName();
 
+        // ✅ Début de stage à 8h30
         if (s.getStartDate() != null) {
             events.add(CalendrierEventDTO.builder()
                     .id("stage-debut-" + s.getId())
                     .title("Début stage : " + nom)
-                    .start(s.getStartDate().atStartOfDay())
-                    .end(s.getStartDate().atTime(23, 59))
+                    .start(s.getStartDate().atTime(8, 30))
+                    .end(s.getStartDate().atTime(17, 0))
                     .type("STAGE_DEBUT")
                     .color("#10B981")
                     .projetId(projetId)
@@ -194,12 +185,13 @@ public class CalendrierService {
                     .build());
         }
 
+        // ✅ Fin de stage à 8h30
         if (s.getEndDate() != null) {
             events.add(CalendrierEventDTO.builder()
                     .id("stage-fin-" + s.getId())
                     .title("Fin stage : " + nom)
-                    .start(s.getEndDate().atStartOfDay())
-                    .end(s.getEndDate().atTime(23, 59))
+                    .start(s.getEndDate().atTime(8, 30))
+                    .end(s.getEndDate().atTime(17, 0))
                     .type("STAGE_FIN")
                     .color("#8B5CF6")
                     .projetId(projetId)
@@ -208,12 +200,13 @@ public class CalendrierService {
                     .build());
         }
 
+        // ✅ Période complète — garde minuit pour couvrir toute la durée
         if (s.getStartDate() != null && s.getEndDate() != null) {
             events.add(CalendrierEventDTO.builder()
                     .id("stage-periode-" + s.getId())
                     .title("Stage : " + nom)
                     .start(s.getStartDate().atStartOfDay())
-                    .end(s.getEndDate().atTime(23, 59))
+                    .end(s.getEndDate().atTime(17, 0))
                     .type("STAGE_PERIODE")
                     .color("#DBEAFE")
                     .stagiaireId(s.getId())

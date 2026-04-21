@@ -290,6 +290,8 @@ public class UserController {
     @Data public static class UserResponse {
         private String id, firstName, lastName, email, phone, role, accountStatus,
                 photoUrl, departement, createdAt;
+        private int nbStagiaires; // ✅ ajout
+
     }
 
     @Data public static class UpdateMeRequest {
@@ -312,6 +314,11 @@ public class UserController {
         r.setPhotoUrl(u.getPhotoUrl());
         r.setDepartement(u.getDepartement() != null ? u.getDepartement().getLabel() : null);
         r.setCreatedAt(u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
+        // ✅ Calcul nbStagiaires si tuteur
+        if (Role.TUTEUR.equals(u.getRole())) {
+            int nb = (int) stagiaireRepository.countByTuteurIdAndDeletedFalse(u.getId());
+            r.setNbStagiaires(nb);
+        }
         return r;
     }
 
