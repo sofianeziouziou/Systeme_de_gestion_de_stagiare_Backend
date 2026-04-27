@@ -1,4 +1,3 @@
-// DESTINATION : src/main/java/com/hikma/stagiaires/service/ProjetService.java
 package com.hikma.stagiaires.service.projet;
 
 import com.hikma.stagiaires.dto.projet.ProjetDTOs.*;
@@ -9,13 +8,15 @@ import com.hikma.stagiaires.model.projet.ProjetStatus;
 import com.hikma.stagiaires.model.user.AccountStatus;
 import com.hikma.stagiaires.model.user.Role;
 import com.hikma.stagiaires.model.user.User;
+import com.hikma.stagiaires.model.stagiaire.Stagiaire;
 import com.hikma.stagiaires.repository.ProjetRepository;
 import com.hikma.stagiaires.repository.StagiaireRepository;
 import com.hikma.stagiaires.repository.UserRepository;
 import com.hikma.stagiaires.service.commun.AuditLogService;
-import com.hikma.stagiaires.service.notification.EmailNotificationService;
 import com.hikma.stagiaires.service.commun.FileStorageService;
+import com.hikma.stagiaires.service.notification.EmailNotificationService;
 import com.hikma.stagiaires.service.notification.NotificationService;
+import com.hikma.stagiaires.service.stagiaire.StagiaireResolverService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.*;
@@ -25,10 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,20 +34,25 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjetService {
 
-    private final ProjetRepository         projetRepository;
-    private final StagiaireRepository      stagiaireRepository;
-    private final UserRepository           userRepository;
-    private final NotificationService      notificationService;
-    private final FileStorageService       fileStorageService;
-    private final AuditLogService          auditLogService;
-    private final EmailNotificationService emailNotificationService;
+    private final ProjetRepository          projetRepository;
+    private final StagiaireRepository       stagiaireRepository;
+    private final UserRepository            userRepository;
+    private final NotificationService       notificationService;
+    private final FileStorageService        fileStorageService;
+    private final AuditLogService           auditLogService;
+    private final EmailNotificationService  emailNotificationService;
+    private final StagiaireResolverService  stagiaireResolver;  // ✅ NOUVEAU
 
     // ─────────────────────────────────────────────────────────────────────
     // CRÉER un projet (RH)
     // ─────────────────────────────────────────────────────────────────────
     public ProjetResponse create(CreateRequest req, String rhId) {
 
-        if (req.getStagiaireIds() != null) {
+        // ✅ Validation stagiaires actifs — batch (2 queries au lieu de N×3)
+        if (req.getStagiaireIds() != null && !req.getStagiaireIds().isEmpty()) {
+            Map<String, Stagiaire> resolved =
+                    stagiaireResolver.resolveBatch(req.getStagiaireIds());
+
             for (String sid : req.getStagiaireIds()) {
                 boolean hasActive = projetRepository
                         .findByStagiaireIdsContainingAndDeletedFalse(sid)
@@ -57,13 +60,10 @@ public class ProjetService {
                         .anyMatch(p -> p.getStatus() != ProjetStatus.TERMINE
                                 && p.getStatus() != ProjetStatus.ANNULE);
                 if (hasActive) {
-                    String nom = stagiaireRepository.findById(sid)
-                            .map(s -> s.getFirstName() + " " + s.getLastName())
-                            .orElseGet(() -> stagiaireRepository.findByUserId(sid)
-                                    .map(s -> s.getFirstName() + " " + s.getLastName())
-                                    .orElseGet(() -> userRepository.findById(sid)
-                                            .map(u -> u.getFirstName() + " " + u.getLastName())
-                                            .orElse(sid)));
+                    Stagiaire s = resolved.get(sid);
+                    String nom = s != null
+                            ? s.getFirstName() + " " + s.getLastName()
+                            : sid;
                     throw new IllegalArgumentException(
                             "Le stagiaire " + nom + " a déjà un projet actif en cours.");
                 }
@@ -86,21 +86,19 @@ public class ProjetService {
         Projet saved = projetRepository.save(projet);
         auditLogService.log(rhId, "CREATE", "PROJET", saved.getId(), null);
 
+        // ✅ Mise à jour tuteurId sur les stagiaires — batch resolver
         if (req.getStagiaireIds() != null && req.getTuteurId() != null) {
+            Map<String, Stagiaire> resolved =
+                    stagiaireResolver.resolveBatch(req.getStagiaireIds());
+
             for (String sid : req.getStagiaireIds()) {
-                stagiaireRepository.findById(sid).ifPresentOrElse(stagiaire -> {
-                    if (stagiaire.getTuteurId() == null || stagiaire.getTuteurId().isBlank()) {
-                        stagiaire.setTuteurId(req.getTuteurId());
-                        stagiaireRepository.save(stagiaire);
-                        log.info("[PROJET] tuteurId mis à jour pour stagiaire _id={}", sid);
-                    }
-                }, () -> stagiaireRepository.findByUserId(sid).ifPresent(stagiaire -> {
-                    if (stagiaire.getTuteurId() == null || stagiaire.getTuteurId().isBlank()) {
-                        stagiaire.setTuteurId(req.getTuteurId());
-                        stagiaireRepository.save(stagiaire);
-                        log.info("[PROJET] tuteurId mis à jour pour stagiaire userId={}", sid);
-                    }
-                }));
+                Stagiaire s = resolved.get(sid);
+                if (s != null
+                        && (s.getTuteurId() == null || s.getTuteurId().isBlank())) {
+                    s.setTuteurId(req.getTuteurId());
+                    stagiaireRepository.save(s);
+                    log.info("[PROJET] tuteurId mis à jour pour stagiaire sid={}", sid);
+                }
             }
         }
 
@@ -143,7 +141,7 @@ public class ProjetService {
                 notificationService.createNotification(
                         sid, NotificationType.PROJET_ASSIGNE,
                         "Projet accepté : " + p.getTitle(),
-                        tuteurNom + " a accepté d'encadrer votre projet. Il commence maintenant !",
+                        tuteurNom + " a accepté d'encadrer votre projet.",
                         projetId);
             }
         }
@@ -200,10 +198,12 @@ public class ProjetService {
 
         if (!TuteurAcceptation.REFUSED.equals(p.getTuteurAcceptation()))
             throw new IllegalArgumentException(
-                    "Le projet n'est pas en état REFUSED. Statut actuel : " + p.getTuteurAcceptation());
+                    "Le projet n'est pas en état REFUSED. Statut actuel : "
+                            + p.getTuteurAcceptation());
 
         User nouveauTuteur = userRepository.findById(nouveauTuteurId)
-                .orElseThrow(() -> new NoSuchElementException("Tuteur introuvable : " + nouveauTuteurId));
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Tuteur introuvable : " + nouveauTuteurId));
         if (!Role.TUTEUR.equals(nouveauTuteur.getRole()))
             throw new IllegalArgumentException("Cet utilisateur n'est pas un tuteur.");
 
@@ -214,24 +214,23 @@ public class ProjetService {
         Projet saved = projetRepository.save(p);
 
         auditLogService.log(rhId, "REASSIGN_TUTEUR", "PROJET", projetId, null);
-        log.info("[PROJET] Tuteur réassigné id={} ancien={} nouveau={}", projetId, ancienTuteurId, nouveauTuteurId);
+        log.info("[PROJET] Tuteur réassigné id={} ancien={} nouveau={}",
+                projetId, ancienTuteurId, nouveauTuteurId);
 
-        if (p.getStagiaireIds() != null) {
-            for (String sid : p.getStagiaireIds()) {
-                stagiaireRepository.findById(sid).ifPresentOrElse(s -> {
-                    s.setTuteurId(nouveauTuteurId);
-                    stagiaireRepository.save(s);
-                }, () -> stagiaireRepository.findByUserId(sid).ifPresent(s -> {
-                    s.setTuteurId(nouveauTuteurId);
-                    stagiaireRepository.save(s);
-                }));
-            }
+        // ✅ Mise à jour tuteurId sur stagiaires — batch
+        if (p.getStagiaireIds() != null && !p.getStagiaireIds().isEmpty()) {
+            Map<String, Stagiaire> resolved =
+                    stagiaireResolver.resolveBatch(p.getStagiaireIds());
+            resolved.values().forEach(s -> {
+                s.setTuteurId(nouveauTuteurId);
+                stagiaireRepository.save(s);
+            });
         }
 
         notificationService.createNotification(
                 nouveauTuteurId, NotificationType.PROJET_ASSIGNE,
                 "Nouveau projet à accepter : " + p.getTitle(),
-                "Le RH vous a assigné un projet suite à un refus. Connectez-vous pour l'accepter.",
+                "Le RH vous a assigné un projet suite à un refus.",
                 projetId);
         emailNotificationService.envoyerEmailNouveauProjetAvecAcceptation(saved);
 
@@ -246,26 +245,30 @@ public class ProjetService {
         return toResponse(findActiveById(id));
     }
 
+    // ✅ getAll — batch complet via toResponseList
     public Page<ProjetResponse> getAll(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return projetRepository.findByDeletedFalse(pageable).map(this::toResponse);
+        List<Projet> projets = projetRepository.findByDeletedFalse(pageable).getContent();
+        List<ProjetResponse> responses = toResponseList(projets);
+        long total = projetRepository.countByDeletedFalse();
+        return new PageImpl<>(responses, pageable, total);
     }
 
+    // ✅ getByTuteur — batch
     public List<ProjetResponse> getByTuteur(String tuteurId) {
-        return projetRepository.findByTuteurIdAndDeletedFalse(tuteurId)
-                .stream().map(this::toResponse).collect(Collectors.toList());
+        List<Projet> projets =
+                projetRepository.findByTuteurIdAndDeletedFalse(tuteurId);
+        return toResponseList(projets);
     }
 
-    // ✅ FIX — double lookup : userId direct + stagiaire._id
+    // ✅ getByStagiaire — corrigé + batch
     public List<ProjetResponse> getByStagiaire(String userId) {
-        // 1. Cherche par userId direct (cas futur où stagiaireIds stocke userId)
         List<Projet> projets = new ArrayList<>(
                 projetRepository.findByStagiaireIdsContainingAndDeletedFalse(userId));
 
-        // 2. ✅ Cherche par stagiaire._id (cas actuel dans MongoDB)
         if (projets.isEmpty()) {
             String stagiaireId = stagiaireRepository.findByUserId(userId)
-                    .map(s -> s.getId())
+                    .map(Stagiaire::getId)
                     .orElse(null);
             if (stagiaireId != null && !stagiaireId.equals(userId)) {
                 List<Projet> parId = projetRepository
@@ -276,23 +279,25 @@ public class ProjetService {
             }
         }
 
-        return projets.stream().map(this::toResponse).collect(Collectors.toList());
+        return toResponseList(projets);
     }
 
     public List<ProjetResponse> getPendingForTuteur(String tuteurId) {
-        return projetRepository.findByTuteurIdAndDeletedFalse(tuteurId)
+        List<Projet> projets = projetRepository
+                .findByTuteurIdAndDeletedFalse(tuteurId)
                 .stream()
                 .filter(p -> TuteurAcceptation.PENDING.equals(p.getTuteurAcceptation()))
-                .map(this::toResponse)
                 .collect(Collectors.toList());
+        return toResponseList(projets);
     }
 
     public List<ProjetResponse> getRefusedProjets() {
-        return projetRepository.findByDeletedFalse(Pageable.unpaged())
+        List<Projet> projets = projetRepository
+                .findByDeletedFalse(Pageable.unpaged())
                 .stream()
                 .filter(p -> TuteurAcceptation.REFUSED.equals(p.getTuteurAcceptation()))
-                .map(this::toResponse)
                 .collect(Collectors.toList());
+        return toResponseList(projets);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -343,7 +348,8 @@ public class ProjetService {
         p.setSprints(updated);
 
         long total    = updated.size();
-        long termines = updated.stream().filter(s -> "TERMINE".equals(s.getStatus())).count();
+        long termines = updated.stream()
+                .filter(s -> "TERMINE".equals(s.getStatus())).count();
 
         if (total > 0) {
             int progress = (int) Math.round((double) termines / total * 100);
@@ -384,7 +390,8 @@ public class ProjetService {
         LocalDate in7Days = today.plusDays(7);
 
         projetRepository
-                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(ProjetStatus.EN_COURS, today, in3Days)
+                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+                        ProjetStatus.EN_COURS, today, in3Days)
                 .stream()
                 .filter(p -> TuteurAcceptation.ACCEPTED.equals(p.getTuteurAcceptation()))
                 .forEach(p -> {
@@ -393,12 +400,14 @@ public class ProjetService {
                 });
 
         projetRepository
-                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(ProjetStatus.EN_COURS, in3Days, in7Days)
+                .findByDeletedFalseAndStatusAndPlannedEndDateBetween(
+                        ProjetStatus.EN_COURS, in3Days, in7Days)
                 .stream()
                 .filter(p -> TuteurAcceptation.ACCEPTED.equals(p.getTuteurAcceptation()))
                 .forEach(p -> notificationService.notifyDeadlineProche(p));
 
-        List<ProjetStatus> exclus = List.of(ProjetStatus.TERMINE, ProjetStatus.ANNULE, ProjetStatus.SUSPENDU);
+        List<ProjetStatus> exclus =
+                List.of(ProjetStatus.TERMINE, ProjetStatus.ANNULE, ProjetStatus.SUSPENDU);
 
         projetRepository
                 .findByDeletedFalseAndStatusNotInAndPlannedEndDateBefore(exclus, today)
@@ -420,8 +429,10 @@ public class ProjetService {
                 .filter(p -> TuteurAcceptation.ACCEPTED.equals(p.getTuteurAcceptation()))
                 .forEach(p -> notificationService.notifySansMiseAJour(p));
 
+        // ✅ Sprints en retard — batch stagiaires par projet
         projetRepository.findByDeletedFalse(Pageable.unpaged()).forEach(p -> {
             if (p.getSprints() == null || p.getSprints().isEmpty()) return;
+
             boolean changed = false;
             for (Projet.Sprint sprint : p.getSprints()) {
                 if ("TERMINE".equals(sprint.getStatus())) continue;
@@ -445,7 +456,7 @@ public class ProjetService {
                 .filter(p -> p.getCreatedAt() != null
                         && p.getCreatedAt().isBefore(LocalDateTime.now().minusHours(24)))
                 .forEach(p -> {
-                    log.warn("[SCHEDULER] Projet {} en attente d'acceptation depuis +24h", p.getId());
+                    log.warn("[SCHEDULER] Projet {} en attente +24h", p.getId());
                     emailNotificationService.envoyerEmailRappelAcceptation(p);
                 });
 
@@ -453,7 +464,157 @@ public class ProjetService {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // HELPERS
+    // toResponse — unitaire (appels isolés : getById, create, update...)
+    // ─────────────────────────────────────────────────────────────────────
+    public ProjetResponse toResponse(Projet p) {
+        // ✅ Pour un projet seul : 2 queries batch stagiaires + 1 query tuteur
+        List<String> stagiaireIds = p.getStagiaireIds() != null
+                ? p.getStagiaireIds() : List.of();
+
+        Map<String, Stagiaire> stagiaireMap =
+                stagiaireResolver.resolveBatch(stagiaireIds);
+
+        User tuteur = p.getTuteurId() != null
+                ? userRepository.findById(p.getTuteurId()).orElse(null)
+                : null;
+
+        return buildResponse(p, stagiaireMap, tuteur);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // toResponseList — batch (listes — évite N+1)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * ✅ Convertit une liste de Projets en réponses.
+     * 3 queries max pour N projets (au lieu de N×3 + N queries).
+     */
+    public List<ProjetResponse> toResponseList(List<Projet> projets) {
+        if (projets == null || projets.isEmpty()) return Collections.emptyList();
+
+        // ── Collecter tous les stagiaireIds distincts ──────────────────────
+        List<String> allStagiaireIds = projets.stream()
+                .filter(p -> p.getStagiaireIds() != null)
+                .flatMap(p -> p.getStagiaireIds().stream())
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // ✅ 2 queries pour TOUS les stagiaires de TOUS les projets
+        Map<String, Stagiaire> stagiaireMap =
+                stagiaireResolver.resolveBatch(allStagiaireIds);
+
+        // ── Collecter tous les tuteurIds distincts ─────────────────────────
+        List<String> allTuteurIds = projets.stream()
+                .map(Projet::getTuteurId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // ✅ 1 query pour TOUS les tuteurs
+        Map<String, User> tuteurMap = allTuteurIds.isEmpty()
+                ? Collections.emptyMap()
+                : userRepository.findByIdIn(allTuteurIds).stream()
+                  .collect(Collectors.toMap(User::getId, u -> u));
+
+        // ── Construire les réponses sans requêtes supplémentaires ──────────
+        return projets.stream()
+                .map(p -> buildResponse(
+                        p,
+                        stagiaireMap,
+                        tuteurMap.get(p.getTuteurId())))
+                .collect(Collectors.toList());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // buildResponse — construit ProjetResponse depuis cache (zéro query)
+    // ─────────────────────────────────────────────────────────────────────
+    private ProjetResponse buildResponse(
+            Projet p,
+            Map<String, Stagiaire> stagiaireMap,
+            User tuteur) {
+
+        ProjetResponse r = new ProjetResponse();
+        r.setId(p.getId());
+        r.setTitle(p.getTitle());
+        r.setDescription(p.getDescription());
+        r.setStagiaireIds(p.getStagiaireIds());
+        r.setTuteurId(p.getTuteurId());
+        r.setStartDate(p.getStartDate());
+        r.setPlannedEndDate(p.getPlannedEndDate());
+        r.setActualEndDate(p.getActualEndDate());
+        r.setProgress(p.getProgress());
+        r.setStatus(p.getStatus());
+        r.setTechnologies(p.getTechnologies());
+        r.setReportUrl(p.getReportUrl());
+        r.setReportSubmittedAt(p.getReportSubmittedAt());
+        r.setCreatedAt(p.getCreatedAt());
+        r.setUpdatedAt(p.getUpdatedAt());
+        r.setDepartement(p.getDepartement());
+        r.setTuteurAcceptation(p.getTuteurAcceptation());
+        r.setTuteurRefusRaison(p.getTuteurRefusRaison());
+
+        // ── Tuteur depuis cache ────────────────────────────────────────────
+        if (tuteur != null) {
+            r.setTuteurName(tuteur.getFirstName() + " " + tuteur.getLastName());
+            r.setTuteurPhotoUrl(tuteur.getPhotoUrl());
+        }
+
+        // ── Sprints ────────────────────────────────────────────────────────
+        LocalDate today = LocalDate.now();
+        if (p.getSprints() != null) {
+            r.setSprints(p.getSprints().stream().map(s -> {
+                SprintResponse sr = new SprintResponse();
+                sr.setId(s.getId());
+                sr.setTitle(s.getTitle());
+                sr.setDescription(s.getDescription());
+                sr.setStartDate(s.getStartDate());
+                sr.setEndDate(s.getEndDate());
+                sr.setStatus(s.getStatus());
+                sr.setStagiaireId(s.getStagiaireId());
+                sr.setOverdue(!("TERMINE".equals(s.getStatus()))
+                        && s.getEndDate() != null
+                        && s.getEndDate().isBefore(today));
+
+                // ✅ Nom stagiaire du sprint depuis cache (zéro query)
+                if (s.getStagiaireId() != null) {
+                    Stagiaire st = stagiaireMap.get(s.getStagiaireId());
+                    if (st != null) {
+                        sr.setStagiaireName(st.getFirstName() + " " + st.getLastName());
+                    } else {
+                        log.warn("[SPRINT] stagiaire introuvable pour id={}", s.getStagiaireId());
+                    }
+                }
+                return sr;
+            }).collect(Collectors.toList()));
+        }
+
+        // ── Stagiaires depuis cache ────────────────────────────────────────
+        if (p.getStagiaireIds() != null) {
+            r.setStagiaires(p.getStagiaireIds().stream()
+                    .filter(sid -> sid != null && !sid.isBlank())
+                    .map(sid -> {
+                        Stagiaire s = stagiaireMap.get(sid);
+                        if (s == null) {
+                            log.warn("[PROJET] stagiaire introuvable pour sid={}", sid);
+                            return null;
+                        }
+                        ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
+                        si.setId(s.getId());
+                        si.setFirstName(s.getFirstName());
+                        si.setLastName(s.getLastName());
+                        si.setPhotoUrl(s.getPhotoUrl());
+                        return si;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList()));
+        }
+
+        return r;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // HELPERS privés
     // ─────────────────────────────────────────────────────────────────────
 
     private List<Projet.Sprint> buildSprints(List<SprintRequest> requests) {
@@ -475,117 +636,5 @@ public class ProjetService {
         return projetRepository.findById(id)
                 .filter(p -> !p.isDeleted())
                 .orElseThrow(() -> new NoSuchElementException("Projet introuvable : " + id));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // toResponse — triple lookup stagiaires
-    // ─────────────────────────────────────────────────────────────────────
-    public ProjetResponse toResponse(Projet p) {
-        ProjetResponse r = new ProjetResponse();
-        r.setId(p.getId());
-        r.setTitle(p.getTitle());
-        r.setDescription(p.getDescription());
-        r.setStagiaireIds(p.getStagiaireIds());
-        r.setTuteurId(p.getTuteurId());
-        r.setStartDate(p.getStartDate());
-        r.setPlannedEndDate(p.getPlannedEndDate());
-        r.setActualEndDate(p.getActualEndDate());
-        r.setProgress(p.getProgress());
-        r.setStatus(p.getStatus());
-        r.setTechnologies(p.getTechnologies());
-        r.setReportUrl(p.getReportUrl());
-        r.setReportSubmittedAt(p.getReportSubmittedAt());
-        r.setCreatedAt(p.getCreatedAt());
-        r.setUpdatedAt(p.getUpdatedAt());
-        r.setDepartement(p.getDepartement());
-        r.setTuteurAcceptation(p.getTuteurAcceptation());
-        r.setTuteurRefusRaison(p.getTuteurRefusRaison());
-
-        // Sprints
-        LocalDate today = LocalDate.now();
-        if (p.getSprints() != null) {
-            r.setSprints(p.getSprints().stream().map(s -> {
-                SprintResponse sr = new SprintResponse();
-                sr.setId(s.getId());
-                sr.setTitle(s.getTitle());
-                sr.setDescription(s.getDescription());
-                sr.setStartDate(s.getStartDate());
-                sr.setEndDate(s.getEndDate());
-                sr.setStatus(s.getStatus());
-                sr.setStagiaireId(s.getStagiaireId());
-                sr.setOverdue(!("TERMINE".equals(s.getStatus()))
-                        && s.getEndDate() != null
-                        && s.getEndDate().isBefore(today));
-                if (s.getStagiaireId() != null) {
-                    stagiaireRepository.findById(s.getStagiaireId())
-                            .ifPresentOrElse(
-                                    st -> sr.setStagiaireName(st.getFirstName() + " " + st.getLastName()),
-                                    () -> stagiaireRepository.findByUserId(s.getStagiaireId())
-                                            .ifPresentOrElse(
-                                                    st -> sr.setStagiaireName(st.getFirstName() + " " + st.getLastName()),
-                                                    () -> userRepository.findById(s.getStagiaireId())
-                                                            .ifPresent(u -> sr.setStagiaireName(u.getFirstName() + " " + u.getLastName()))
-                                            )
-                            );
-                }
-                return sr;
-            }).collect(Collectors.toList()));
-        }
-
-        // Nom tuteur
-        if (p.getTuteurId() != null) {
-            userRepository.findById(p.getTuteurId()).ifPresent(u -> {
-                r.setTuteurName(u.getFirstName() + " " + u.getLastName());
-                r.setTuteurPhotoUrl(u.getPhotoUrl());
-            });
-        }
-
-        // ✅ Stagiaires — triple lookup : stagiaires._id → stagiaires.userId → users._id
-        if (p.getStagiaireIds() != null) {
-            r.setStagiaires(p.getStagiaireIds().stream()
-                    .filter(sid -> sid != null && !sid.isBlank())
-                    .map(sid -> {
-                        log.debug("[PROJET] lookup stagiaire sid={}", sid);
-                        return stagiaireRepository.findById(sid)
-                                .map(s -> {
-                                    log.debug("[PROJET] trouvé par _id: {} {}", s.getFirstName(), s.getLastName());
-                                    ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
-                                    si.setId(s.getId());
-                                    si.setFirstName(s.getFirstName());
-                                    si.setLastName(s.getLastName());
-                                    si.setPhotoUrl(s.getPhotoUrl());
-                                    return si;
-                                })
-                                .orElseGet(() -> stagiaireRepository.findByUserId(sid)
-                                        .map(s -> {
-                                            log.debug("[PROJET] trouvé par userId: {} {}", s.getFirstName(), s.getLastName());
-                                            ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
-                                            si.setId(s.getId());
-                                            si.setFirstName(s.getFirstName());
-                                            si.setLastName(s.getLastName());
-                                            si.setPhotoUrl(s.getPhotoUrl());
-                                            return si;
-                                        })
-                                        .orElseGet(() -> userRepository.findById(sid)
-                                                .map(u -> {
-                                                    log.debug("[PROJET] trouvé dans users: {} {}", u.getFirstName(), u.getLastName());
-                                                    ProjetResponse.StagiaireInfo si = new ProjetResponse.StagiaireInfo();
-                                                    si.setId(sid);
-                                                    si.setFirstName(u.getFirstName());
-                                                    si.setLastName(u.getLastName());
-                                                    return si;
-                                                })
-                                                .orElseGet(() -> {
-                                                    log.warn("[PROJET] stagiaire introuvable pour sid={}", sid);
-                                                    return null;
-                                                })
-                                        )
-                                );
-                    })
-                    .filter(si -> si != null)
-                    .collect(Collectors.toList()));
-        }
-
-        return r;
     }
 }

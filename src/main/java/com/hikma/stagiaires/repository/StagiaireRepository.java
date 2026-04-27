@@ -15,7 +15,7 @@ public interface StagiaireRepository extends MongoRepository<Stagiaire, String> 
     boolean existsByEmailAndDeletedFalse(String email);
     Optional<Stagiaire> findByEmailAndDeletedFalse(String email);
 
-    // ── Toutes les fiches actives (P3 fix — 1 requête pour recommandations) ──
+    // ── Toutes les fiches actives ─────────────────────────────────────────
     List<Stagiaire> findByDeletedFalse();
 
     // ── Par tuteur ────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ public interface StagiaireRepository extends MongoRepository<Stagiaire, String> 
     // ── DashboardService : top 10 par score ──────────────────────────────
     List<Stagiaire> findTop10ByDeletedFalseOrderByGlobalScoreDesc();
 
-    // ── DashboardService : par département (pour agrégation scores) ───────
+    // ── DashboardService : par département ───────────────────────────────
     @Query("{ 'departement': ?0, 'deleted': false }")
     List<Stagiaire> findByDepartementForAggregation(String departement);
 
@@ -38,4 +38,13 @@ public interface StagiaireRepository extends MongoRepository<Stagiaire, String> 
     List<Stagiaire> findByDepartementAndDeletedFalse(String departement);
     long countByTuteurIdAndDeletedFalse(String tuteurId);
 
+    // ── Batch lookup par liste de stagiaire._id ───────────────────────────
+    List<Stagiaire> findByIdInAndDeletedFalse(List<String> ids);
+
+    // ── Batch lookup par liste de userId ─────────────────────────────────
+    List<Stagiaire> findByUserIdInAndDeletedFalse(List<String> userIds);
+
+    // ✅ NOUVEAU — pour migration : tous avec userId non null
+    @Query("{ 'userId': { $ne: null }, 'deleted': false }")
+    List<Stagiaire> findAllWithUserId();
 }

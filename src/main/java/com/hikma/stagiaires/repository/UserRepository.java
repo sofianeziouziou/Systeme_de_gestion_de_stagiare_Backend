@@ -19,11 +19,12 @@ public interface UserRepository extends MongoRepository<User, String> {
     List<User> findByRole(Role role);
     List<User> findByRoleAndAccountStatus(Role role, AccountStatus accountStatus);
 
-    /** NOUVEAU — tuteurs par département */
     List<User> findByRoleAndDepartement(Role role, Departement departement);
 
-    /** NOUVEAU — tuteurs approuvés par département */
     List<User> findByRoleAndDepartementAndAccountStatus(
             Role role, Departement departement, AccountStatus status
     );
+
+    // ✅ NOUVEAU — batch pour éviter N+1 sur tuteurs dans ProjetService
+    List<User> findByIdIn(List<String> ids);
 }

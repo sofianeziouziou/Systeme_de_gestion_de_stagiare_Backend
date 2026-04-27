@@ -1,4 +1,3 @@
-// DESTINATION : src/main/java/com/hikma/stagiaires/service/StagiaireService.java
 package com.hikma.stagiaires.service.stagiaire;
 
 import com.hikma.stagiaires.dto.stagiaire.StagiaireDTOs.*;
@@ -33,13 +32,15 @@ import java.time.temporal.ChronoUnit;
 @RequiredArgsConstructor
 public class StagiaireService {
 
-    private final StagiaireRepository stagiaireRepository;
-    private final UserRepository       userRepository;
-    private final MongoTemplate        mongoTemplate;
-    private final FileStorageService fileStorageService;
-    private final AuditLogService auditLogService;
-    private final CvAnalysisService cvAnalysisService;
-    private final OnboardingService onboardingService;
+    private final StagiaireRepository    stagiaireRepository;
+    private final UserRepository         userRepository;
+    private final MongoTemplate          mongoTemplate;
+    private final FileStorageService     fileStorageService;
+    private final AuditLogService        auditLogService;
+    private final CvAnalysisService      cvAnalysisService;
+    private final OnboardingService      onboardingService;
+
+    // ── CRUD de base ──────────────────────────────────────────────────────
 
     public StagiaireResponse create(CreateRequest req, String createdByUserId) {
         if (stagiaireRepository.existsByEmailAndDeletedFalse(req.getEmail())) {
@@ -53,25 +54,33 @@ public class StagiaireService {
                 .departement(req.getDepartement()).tuteurId(req.getTuteurId())
                 .startDate(req.getStartDate()).endDate(req.getEndDate())
                 .durationMonths((int) months)
-                .technicalSkills(req.getTechnicalSkills() != null ? req.getTechnicalSkills() : List.of())
-                .softSkills(req.getSoftSkills() != null ? req.getSoftSkills() : List.of())
+                .technicalSkills(req.getTechnicalSkills() != null
+                        ? req.getTechnicalSkills() : List.of())
+                .softSkills(req.getSoftSkills() != null
+                        ? req.getSoftSkills() : List.of())
                 .status(StagiaireStatus.EN_COURS).build();
         Stagiaire saved = stagiaireRepository.save(stagiaire);
         auditLogService.log(createdByUserId, "CREATE", "STAGIAIRE", saved.getId(), null);
         return toResponse(saved);
     }
 
-    public StagiaireResponse getById(String id) { return toResponse(findActiveById(id)); }
+    public StagiaireResponse getById(String id) {
+        return toResponse(findActiveById(id));
+    }
 
     public StagiaireResponse getByUserId(String userId) {
         Stagiaire stagiaire = stagiaireRepository.findByUserId(userId)
-                .orElseThrow(() -> new NoSuchElementException("Aucun profil stagiaire trouve pour cet utilisateur"));
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Aucun profil stagiaire trouve pour cet utilisateur"));
         return toResponse(stagiaire);
     }
+
+    // ── Recherche paginée ─────────────────────────────────────────────────
 
     public PagedResponse search(SearchFilter filter) {
         Query query = new Query();
         query.addCriteria(Criteria.where("deleted").is(false));
+
         if (StringUtils.hasText(filter.getDepartement()))
             query.addCriteria(Criteria.where("departement").is(filter.getDepartement()));
         if (filter.getMinScore() != null)
@@ -99,28 +108,46 @@ public class StagiaireService {
                     Criteria.where("school").regex(regex, "i"),
                     Criteria.where("departement").regex(regex, "i")));
         }
+
         long total = mongoTemplate.count(query, Stagiaire.class);
-        Pageable pageable = PageRequest.of(filter.getPage(), filter.getSize(), Sort.by("globalScore").descending());
+        Pageable pageable = PageRequest.of(
+                filter.getPage(), filter.getSize(),
+                Sort.by("globalScore").descending());
         query.with(pageable);
-        List<StagiaireResponse> responses = mongoTemplate.find(query, Stagiaire.class).stream()
-                .map(this::toResponse).collect(Collectors.toList());
+
+        // ✅ batch tuteurs sur la page — pas de N+1
+        List<Stagiaire> stagiaires = mongoTemplate.find(query, Stagiaire.class);
+        List<StagiaireResponse> responses = toResponseList(stagiaires);
+
         PagedResponse paged = new PagedResponse();
-        paged.setContent(responses); paged.setPage(filter.getPage());
-        paged.setSize(filter.getSize()); paged.setTotalElements(total);
+        paged.setContent(responses);
+        paged.setPage(filter.getPage());
+        paged.setSize(filter.getSize());
+        paged.setTotalElements(total);
         paged.setTotalPages((int) Math.ceil((double) total / filter.getSize()));
         return paged;
     }
+
+    // ── Mise à jour ───────────────────────────────────────────────────────
 
     public StagiaireResponse update(String id, UpdateRequest req, String callerUserId) {
         Stagiaire s = findActiveById(id);
         User caller = userRepository.findById(callerUserId)
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable"));
+
         switch (caller.getRole()) {
-            case STAGIAIRE -> { if (!callerUserId.equals(s.getUserId())) throw new AccessDeniedException("Non autorise."); }
-            case TUTEUR    -> { if (!callerUserId.equals(s.getTuteurId())) throw new AccessDeniedException("Non encadrant."); }
-            case RH        -> { }
-            default        -> throw new AccessDeniedException("Role non reconnu.");
+            case STAGIAIRE -> {
+                if (!callerUserId.equals(s.getUserId()))
+                    throw new AccessDeniedException("Non autorise.");
+            }
+            case TUTEUR -> {
+                if (!callerUserId.equals(s.getTuteurId()))
+                    throw new AccessDeniedException("Non encadrant.");
+            }
+            case RH -> { /* accès total */ }
+            default  -> throw new AccessDeniedException("Role non reconnu.");
         }
+
         if (req.getFirstName()       != null) s.setFirstName(req.getFirstName());
         if (req.getLastName()        != null) s.setLastName(req.getLastName());
         if (req.getPhone()           != null) s.setPhone(req.getPhone());
@@ -135,8 +162,11 @@ public class StagiaireService {
         if (req.getSoftSkills()      != null) s.setSoftSkills(req.getSoftSkills());
         if (req.getStatus()          != null) s.setStatus(req.getStatus());
         if (req.getBio()             != null) s.setBio(req.getBio());
+
         List<String> missing = onboardingService.computeMissingFields(s);
-        s.setMissingFields(missing); s.setProfileCompleted(missing.isEmpty());
+        s.setMissingFields(missing);
+        s.setProfileCompleted(missing.isEmpty());
+
         Stagiaire saved = stagiaireRepository.save(s);
         auditLogService.log(callerUserId, "UPDATE", "STAGIAIRE", id, null);
         return toResponse(saved);
@@ -149,26 +179,38 @@ public class StagiaireService {
         auditLogService.log(deletedByUserId, "DELETE", "STAGIAIRE", id, null);
     }
 
+    // ── Upload ────────────────────────────────────────────────────────────
+
     public StagiaireResponse uploadCv(String id, MultipartFile file, String userId) {
         String contentType = file.getContentType();
         if (contentType == null || !contentType.equals("application/pdf"))
             throw new IllegalArgumentException("Seuls les fichiers PDF sont acceptes.");
+
         Stagiaire s = findActiveById(id);
         String url = fileStorageService.uploadFile(file, "cv/" + id);
         s.setCvUrl(url);
+
         try {
             CvData analysis = cvAnalysisService.analyze(file);
             s.setCvAnalysis(analysis);
-            if (s.getSchool() == null && analysis.getDetectedSchool() != null) s.setSchool(analysis.getDetectedSchool());
+            if (s.getSchool() == null && analysis.getDetectedSchool() != null)
+                s.setSchool(analysis.getDetectedSchool());
             if (s.getLevel() == null && analysis.getDetectedLevel() != null) {
-                try { s.setLevel(EducationLevel.valueOf(analysis.getDetectedLevel())); } catch (IllegalArgumentException ignored) { }
+                try {
+                    s.setLevel(EducationLevel.valueOf(analysis.getDetectedLevel()));
+                } catch (IllegalArgumentException ignored) { }
             }
             if ((s.getTechnicalSkills() == null || s.getTechnicalSkills().isEmpty())
-                    && analysis.getDetectedSkills() != null && !analysis.getDetectedSkills().isEmpty())
+                    && analysis.getDetectedSkills() != null
+                    && !analysis.getDetectedSkills().isEmpty())
                 s.setTechnicalSkills(analysis.getDetectedSkills());
-        } catch (Exception e) { log.warn("[StagiaireService] CV analyse echec {} : {}", id, e.getMessage()); }
+        } catch (Exception e) {
+            log.warn("[StagiaireService] CV analyse echec {} : {}", id, e.getMessage());
+        }
+
         List<String> missing = onboardingService.computeMissingFields(s);
-        s.setMissingFields(missing); s.setProfileCompleted(missing.isEmpty());
+        s.setMissingFields(missing);
+        s.setProfileCompleted(missing.isEmpty());
         return toResponse(stagiaireRepository.save(s));
     }
 
@@ -179,32 +221,103 @@ public class StagiaireService {
         return toResponse(stagiaireRepository.save(s));
     }
 
+    // ── Score ─────────────────────────────────────────────────────────────
+
     public void updateScore(String stagiaireId, Double newScore, String evaluationId) {
         Stagiaire s = findActiveById(stagiaireId);
-        s.setGlobalScore(newScore); s.setBadge(calculateBadge(newScore));
+        s.setGlobalScore(newScore);
+        s.setBadge(calculateBadge(newScore));
         List<Stagiaire.ScoreHistory> history = new ArrayList<>(s.getScoreHistory());
         history.add(new Stagiaire.ScoreHistory(newScore, LocalDateTime.now(), evaluationId));
         s.setScoreHistory(history);
         stagiaireRepository.save(s);
     }
 
-    private Badge calculateBadge(Double score) {
-        if (score >= 90) return Badge.EXCELLENCE;
-        if (score >= 75) return Badge.TRES_BIEN;
-        if (score >= 60) return Badge.BIEN;
-        return Badge.A_SURVEILLER;
+    // ── Création fiche automatique à l'approbation ────────────────────────
+
+    public void createFicheForUser(User user) {
+        if (stagiaireRepository.findByUserId(user.getId()).isPresent()) {
+            log.info("Fiche stagiaire deja existante pour userId={}", user.getId());
+            return;
+        }
+        if (user.getEmail() != null) {
+            Optional<Stagiaire> existingByEmail =
+                    stagiaireRepository.findByEmailAndDeletedFalse(user.getEmail());
+            if (existingByEmail.isPresent()) {
+                Stagiaire s = existingByEmail.get();
+                s.setUserId(user.getId());
+                stagiaireRepository.save(s);
+                log.info("UserId lie a la fiche existante email={}", user.getEmail());
+                return;
+            }
+        }
+        Stagiaire stagiaire = Stagiaire.builder()
+                .userId(user.getId())
+                .firstName(user.getFirstName()).lastName(user.getLastName())
+                .email(user.getEmail()).phone(user.getPhone())
+                .status(StagiaireStatus.EN_COURS)
+                .technicalSkills(List.of()).softSkills(List.of())
+                .scoreHistory(List.of())
+                .globalScore(0.0).deleted(false).build();
+        stagiaireRepository.save(stagiaire);
+        log.info("Fiche stagiaire creee pour userId={}", user.getId());
     }
 
-    private Stagiaire findActiveById(String id) {
-        return stagiaireRepository.findById(id)
-                .filter(s -> !s.isDeleted())
-                .orElseThrow(() -> new NoSuchElementException("Stagiaire introuvable : " + id));
+    public void deleteByUserId(String userId) {
+        stagiaireRepository.findByUserId(userId)
+                .ifPresent(s -> stagiaireRepository.deleteById(s.getId()));
     }
+
+    // ── toResponse : unitaire (appels isolés) ─────────────────────────────
 
     public StagiaireResponse toResponse(Stagiaire s) {
+        StagiaireResponse r = buildBaseResponse(s);
+        // 1 query unitaire — acceptable pour les appels isolés
+        if (s.getTuteurId() != null) {
+            userRepository.findById(s.getTuteurId()).ifPresent(u ->
+                    r.setTuteurName(u.getFirstName() + " " + u.getLastName()));
+        }
+        return r;
+    }
+
+    // ── toResponseList : batch (listes — évite N+1) ───────────────────────
+
+    /**
+     * Convertit une liste de Stagiaires en réponses.
+     * ✅ Charge tous les tuteurs en 1 seule query (au lieu de N queries).
+     */
+    public List<StagiaireResponse> toResponseList(List<Stagiaire> stagiaires) {
+        if (stagiaires == null || stagiaires.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Collecter tous les tuteurIds distincts
+        List<String> tuteurIds = stagiaires.stream()
+                .map(Stagiaire::getTuteurId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // ✅ 1 query pour tous les tuteurs
+        Map<String, User> tuteurMap = tuteurIds.isEmpty()
+                ? Collections.emptyMap()
+                : userRepository.findByIdIn(tuteurIds).stream()
+                  .collect(Collectors.toMap(User::getId, u -> u));
+
+        return stagiaires.stream()
+                .map(s -> toResponseWithTuteurCache(s, tuteurMap))
+                .collect(Collectors.toList());
+    }
+
+    // ── Helpers privés ────────────────────────────────────────────────────
+
+    /**
+     * Construit la réponse sans toucher à la BD (champs directs uniquement).
+     */
+    private StagiaireResponse buildBaseResponse(Stagiaire s) {
         StagiaireResponse r = new StagiaireResponse();
         r.setId(s.getId());
-        r.setUserId(s.getUserId());   // FIX : expose userId = users._id pour stagiaireIds du projet
+        r.setUserId(s.getUserId());
         r.setFirstName(s.getFirstName());
         r.setLastName(s.getLastName());
         r.setEmail(s.getEmail());
@@ -231,39 +344,36 @@ public class StagiaireService {
         r.setCurrentStep(s.getCurrentStep() != null ? s.getCurrentStep().name() : null);
         r.setMissingFields(s.getMissingFields());
         r.setCvAnalysis(s.getCvAnalysis());
+        return r;
+    }
+
+    /**
+     * toResponse avec cache tuteur — zéro query MongoDB supplémentaire.
+     */
+    private StagiaireResponse toResponseWithTuteurCache(
+            Stagiaire s,
+            Map<String, User> tuteurMap) {
+
+        StagiaireResponse r = buildBaseResponse(s);
         if (s.getTuteurId() != null) {
-            userRepository.findById(s.getTuteurId()).ifPresent(u ->
-                    r.setTuteurName(u.getFirstName() + " " + u.getLastName()));
+            User tuteur = tuteurMap.get(s.getTuteurId());
+            if (tuteur != null) {
+                r.setTuteurName(tuteur.getFirstName() + " " + tuteur.getLastName());
+            }
         }
         return r;
     }
 
-    public void deleteByUserId(String userId) {
-        stagiaireRepository.findByUserId(userId)
-                .ifPresent(s -> stagiaireRepository.deleteById(s.getId()));
+    private Badge calculateBadge(Double score) {
+        if (score >= 90) return Badge.EXCELLENCE;
+        if (score >= 75) return Badge.TRES_BIEN;
+        if (score >= 60) return Badge.BIEN;
+        return Badge.A_SURVEILLER;
     }
 
-    public void createFicheForUser(User user) {
-        if (stagiaireRepository.findByUserId(user.getId()).isPresent()) {
-            log.info("Fiche stagiaire deja existante pour userId={}", user.getId());
-            return;
-        }
-        if (user.getEmail() != null) {
-            Optional<Stagiaire> existingByEmail = stagiaireRepository.findByEmailAndDeletedFalse(user.getEmail());
-            if (existingByEmail.isPresent()) {
-                Stagiaire s = existingByEmail.get();
-                s.setUserId(user.getId());
-                stagiaireRepository.save(s);
-                log.info("UserId lie a la fiche existante email={}", user.getEmail());
-                return;
-            }
-        }
-        Stagiaire stagiaire = Stagiaire.builder()
-                .userId(user.getId()).firstName(user.getFirstName()).lastName(user.getLastName())
-                .email(user.getEmail()).phone(user.getPhone()).status(StagiaireStatus.EN_COURS)
-                .technicalSkills(List.of()).softSkills(List.of()).scoreHistory(List.of())
-                .globalScore(0.0).deleted(false).build();
-        stagiaireRepository.save(stagiaire);
-        log.info("Fiche stagiaire creee pour userId={}", user.getId());
+    private Stagiaire findActiveById(String id) {
+        return stagiaireRepository.findById(id)
+                .filter(s -> !s.isDeleted())
+                .orElseThrow(() -> new NoSuchElementException("Stagiaire introuvable : " + id));
     }
 }

@@ -14,6 +14,12 @@ public interface ProjetRepository extends MongoRepository<Projet, String> {
 
     Page<Projet> findByDeletedFalse(Pageable pageable);
 
+    // ✅ NOUVEAU — pour toResponseList() dans getAll()
+    long countByDeletedFalse();
+
+    // ✅ NOUVEAU — pour getByStagiaire() fallback sans pageable
+    List<Projet> findByDeletedFalse();
+
     List<Projet> findByTuteurIdAndDeletedFalse(String tuteurId);
 
     List<Projet> findByStagiaireIdsContainingAndDeletedFalse(String stagiaireId);
@@ -22,17 +28,12 @@ public interface ProjetRepository extends MongoRepository<Projet, String> {
 
     long countByStatusAndDeletedFalse(ProjetStatus status);
 
-    // ── CORRIGÉ : Spring Data convertit LocalDate automatiquement ────────
-
-    // Deadlines proches : EN_COURS + plannedEndDate entre now et limit
     List<Projet> findByDeletedFalseAndStatusAndPlannedEndDateBetween(
             ProjetStatus status, LocalDate start, LocalDate end);
 
-    // Projets en retard : pas TERMINE/ANNULE + plannedEndDate < today
     List<Projet> findByDeletedFalseAndStatusNotInAndPlannedEndDateBefore(
             List<ProjetStatus> excludedStatuses, LocalDate date);
 
-    // Sans mise à jour depuis 5 jours : EN_COURS + updatedAt < limit
     List<Projet> findByDeletedFalseAndStatusAndUpdatedAtBefore(
             ProjetStatus status, LocalDateTime limit);
 }
