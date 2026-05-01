@@ -1,4 +1,3 @@
-// DESTINATION : src/main/java/com/hikma/stagiaires/controller/UserController.java
 package com.hikma.stagiaires.controller.user;
 
 import com.hikma.stagiaires.model.user.AccountStatus;
@@ -8,6 +7,7 @@ import com.hikma.stagiaires.model.user.User;
 import com.hikma.stagiaires.repository.StagiaireRepository;
 import com.hikma.stagiaires.repository.UserRepository;
 import com.hikma.stagiaires.service.commun.AuditLogService;
+import com.hikma.stagiaires.service.notification.EmailNotificationService;
 import com.hikma.stagiaires.service.stagiaire.StagiaireService;
 import com.hikma.stagiaires.dto.stagiaire.StagiaireDTOs.StagiaireResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,11 +19,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
-
 import com.hikma.stagiaires.service.commun.FileStorageService;
 import org.springframework.web.multipart.MultipartFile;
-
-
 
 import java.time.LocalDate;
 import java.util.List;
@@ -31,20 +28,19 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
-
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 @Tag(name = "Users", description = "Gestion des comptes utilisateurs")
 public class UserController {
 
-    private final UserRepository      userRepository;
-    private final AuditLogService     auditLogService;
-    private final StagiaireService    stagiaireService;
-    private final StagiaireRepository stagiaireRepository;   // FIX : ajouté
-    private final PasswordEncoder     passwordEncoder;
-    private final FileStorageService fileStorageService;
-
+    private final UserRepository           userRepository;
+    private final AuditLogService          auditLogService;
+    private final StagiaireService         stagiaireService;
+    private final StagiaireRepository      stagiaireRepository;
+    private final PasswordEncoder          passwordEncoder;
+    private final FileStorageService       fileStorageService;
+    private final EmailNotificationService emailNotificationService; // ← AJOUT
 
     // ── Demandes en attente (RH) ─────────────────────────────────────────────
     @GetMapping("/pending")
@@ -88,14 +84,10 @@ public class UserController {
 
         if (Role.STAGIAIRE.equals(user.getRole())) {
             try {
-                // 1. Créer la fiche si elle n'existe pas
                 stagiaireService.createFicheForUser(user);
 
-                // 2. FIX : calculer startDate/endDate depuis durationMonths
                 stagiaireRepository.findByUserId(user.getId()).ifPresent(stagiaire -> {
                     Integer durationMonths = stagiaire.getDurationMonths();
-
-                    // Calculer seulement si durée renseignée et dates pas encore fixées
                     if (durationMonths != null && durationMonths > 0
                             && stagiaire.getStartDate() == null) {
                         LocalDate startDate = LocalDate.now();
@@ -113,6 +105,9 @@ public class UserController {
             }
         }
 
+        // ← AJOUT : notifier l'utilisateur par email
+        emailNotificationService.envoyerEmailCompteApprouve(user);
+
         auditLogService.log(currentUser.getId(), "APPROVE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
@@ -129,6 +124,10 @@ public class UserController {
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
         user.setAccountStatus(AccountStatus.REFUSE);
         userRepository.save(user);
+
+        // ← AJOUT : notifier l'utilisateur par email
+        emailNotificationService.envoyerEmailCompteRefuse(user);
+
         auditLogService.log(currentUser.getId(), "REFUSE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
@@ -164,6 +163,10 @@ public class UserController {
                 .orElseThrow(() -> new NoSuchElementException("Utilisateur introuvable : " + id));
         user.setAccountStatus(AccountStatus.APPROUVE);
         userRepository.save(user);
+
+        // ← AJOUT : notifier la réactivation (réutilise envoyerEmailCompteApprouve)
+        emailNotificationService.envoyerEmailCompteApprouve(user);
+
         auditLogService.log(currentUser.getId(), "ACTIVATE_USER", "USER", id, null);
         return ResponseEntity.ok(toResponse(user));
     }
@@ -235,8 +238,7 @@ public class UserController {
             currentUser.setPhone(req.getPhone());
         if (req.getDepartement() != null && !req.getDepartement().isBlank()) {
             try {
-                currentUser.setDepartement(
-                        Departement.fromString(req.getDepartement()));
+                currentUser.setDepartement(Departement.fromString(req.getDepartement()));
             } catch (IllegalArgumentException ignored) {}
         }
 
@@ -285,9 +287,7 @@ public class UserController {
                 .filter(u -> {
                     if (departement == null || departement.isBlank()) return true;
                     if (u.getDepartement() == null) return false;
-                    // ✅ Comparaison directe sur le label
-                    return u.getDepartement().getLabel()
-                            .equalsIgnoreCase(departement.trim());
+                    return u.getDepartement().getLabel().equalsIgnoreCase(departement.trim());
                 })
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -306,19 +306,21 @@ public class UserController {
         return ResponseEntity.ok(stagiaires);
     }
 
-    // ── DTOs ───────────────────────────────────────────────────────────────
-    @Data public static class UserResponse {
+    // ── DTOs ────────────────────────────────────────────────────────────────
+    @Data
+    public static class UserResponse {
         private String id, firstName, lastName, email, phone, role, accountStatus,
                 photoUrl, departement, createdAt;
-        private int nbStagiaires; // ✅ ajout
-
+        private int nbStagiaires;
     }
 
-    @Data public static class UpdateMeRequest {
+    @Data
+    public static class UpdateMeRequest {
         private String firstName, lastName, phone, departement;
     }
 
-    @Data public static class ChangePasswordRequest {
+    @Data
+    public static class ChangePasswordRequest {
         private String currentPassword, newPassword;
     }
 
@@ -338,7 +340,6 @@ public class UserController {
         }
         r.setDepartement(u.getDepartement() != null ? u.getDepartement().getLabel() : null);
         r.setCreatedAt(u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
-        // ✅ Calcul nbStagiaires si tuteur
         if (Role.TUTEUR.equals(u.getRole())) {
             int nb = (int) stagiaireRepository.countByTuteurIdAndDeletedFalse(u.getId());
             r.setNbStagiaires(nb);
@@ -346,7 +347,7 @@ public class UserController {
         return r;
     }
 
-    // ── Logger ─────────────────────────────────────────────────────────────
+    // ── Logger ──────────────────────────────────────────────────────────────
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(UserController.class);
 }

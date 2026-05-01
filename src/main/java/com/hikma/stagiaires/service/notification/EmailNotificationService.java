@@ -423,6 +423,40 @@ public class EmailNotificationService {
     }
 
     @Async
+    public void envoyerEmailCompteApprouve(User user) {
+        String sujet = "✅ Votre compte SIMS a été approuvé";
+        String corps = buildHeader("Compte approuvé !")
+                + "<p style='color:#374151'>Bonjour <strong>"
+                + user.getFirstName() + " " + user.getLastName() + "</strong>,</p>"
+                + "<p style='color:#374151;line-height:1.7'>"
+                + "Votre compte a été approuvé par le département RH. "
+                + "Vous pouvez maintenant vous connecter à SIMS.</p>"
+                + buildSuccessBox("Rôle : " + user.getRole().name(),
+                "Votre accès est maintenant actif.")
+                + buildButton("Se connecter", "http://localhost:8082/login")
+                + buildFooter();
+
+        sendEmail(user.getEmail(), sujet, corps);
+        log.info("[EMAIL] Compte approuvé → {}", user.getEmail());
+    }
+
+    @Async
+    public void envoyerEmailCompteRefuse(User user) {
+        String sujet = "❌ Votre demande de compte SIMS a été refusée";
+        String corps = buildHeader("Demande refusée")
+                + "<p style='color:#374151'>Bonjour <strong>"
+                + user.getFirstName() + " " + user.getLastName() + "</strong>,</p>"
+                + "<p style='color:#374151;line-height:1.7'>"
+                + "Votre demande de création de compte a été refusée par le département RH.</p>"
+                + buildDangerBox("Demande refusée",
+                "Contactez directement le département RH pour plus d'informations.")
+                + buildFooter();
+
+        sendEmail(user.getEmail(), sujet, corps);
+        log.info("[EMAIL] Compte refusé → {}", user.getEmail());
+    }
+
+    @Async
     public void sendNewPasswordToUser(String toEmail, String userName, String newPassword) {
         String sujet = "🔐 Votre nouveau mot de passe — SIMS Hikma";
         String corps = buildHeader("Nouveau mot de passe")
